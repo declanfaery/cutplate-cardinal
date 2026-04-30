@@ -1,0 +1,22 @@
+{
+  "name": "cutplate-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Full-stack Expo and Node meal planning app.",
+  "scripts": {
+    "dev": "concurrently -n API,APP -c green,cyan \"npm run dev --prefix server\" \"npm run web --prefix mobile\"",
+    "dev:api": "npm run dev --prefix server",
+    "dev:mobile": "npm start --prefix mobile",
+    "web": "npm run web --prefix mobile",
+    "android": "npm run android --prefix mobile",
+    "ios": "npm run ios --prefix mobile",
+    "test": "npm run test --prefix server",
+    "check": "npm run test --prefix server && node --check mobile/App.js",
+    "eas:ios:stage": "cd mobile && npx eas build -p ios --profile preview",
+    "eas:ios:prod": "cd mobile && npx eas build -p ios --profile production",
+    "eas:ios:submit": "cd mobile && npx eas submit -p ios --profile production"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

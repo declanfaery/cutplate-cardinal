@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "CutPlate AI",
+    "slug": "cutplate-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "cutplate",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#edf3ef"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cutplate.cardinal",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.cutplate.cardinal",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#31483f"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
