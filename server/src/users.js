@@ -67,6 +67,22 @@ export async function confirmSignup(token) {
   return publicUser(user);
 }
 
+export async function deleteSignup(email) {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+
+  if (!cleanEmail) {
+    const error = new Error('Email is required.');
+    error.status = 400;
+    throw error;
+  }
+
+  const users = await readUsers();
+  delete users[cleanEmail];
+  await writeUsers(users);
+
+  return { ok: true };
+}
+
 function publicUser(user) {
   return {
     id: user.id,

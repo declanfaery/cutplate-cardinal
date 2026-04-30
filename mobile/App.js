@@ -287,6 +287,35 @@ export default function App() {
     setAppMode('home');
   };
 
+  const deleteAccount = async () => {
+    const email = viewer?.email;
+
+    try {
+      if (email) {
+        await fetchWithRetry(`${API_URL}/api/delete-account`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        }, 1);
+      }
+    } catch {
+      // Local deletion still lets the user remove app data from this device.
+    }
+
+    await AsyncStorage.multiRemove([USER_STORAGE_KEY, CALENDAR_STORAGE_KEY]);
+    setViewer(null);
+    setCalendarMeals([]);
+    setPlan(null);
+    setSelectedMenuPlan(null);
+    setSelectedMealIds([]);
+    setOnboardingIndex(0);
+    setSignupName('');
+    setSignupEmail('');
+    setSignupError('');
+    setSignupNotice('');
+    setAppMode('home');
+  };
+
   const goBack = () => {
     setError('');
     if (plan) {
@@ -731,6 +760,7 @@ export default function App() {
             calendarMeals={calendarMeals}
             onStartGuided={startGuidedPlan}
             onStartPantry={startPantryFinder}
+            onDeleteAccount={deleteAccount}
           />
         ) : appMode === 'pantry' ? (
           <PantryFinderScreen
@@ -1393,7 +1423,9 @@ function OnboardingScreen({
   );
 }
 
-function HomeScreen({ viewer, calendarMeals, onStartGuided, onStartPantry }) {
+function HomeScreen({ viewer, calendarMeals, onStartGuided, onStartPantry, onDeleteAccount }) {
+  const [deleteArmed, setDeleteArmed] = useState(false);
+
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.homeScroll}>
       <View style={styles.homeHero}>
@@ -1427,6 +1459,15 @@ function HomeScreen({ viewer, calendarMeals, onStartGuided, onStartPantry }) {
       </View>
 
       <HomeCalendar meals={calendarMeals} />
+
+      <Pressable
+        onPress={() => (deleteArmed ? onDeleteAccount?.() : setDeleteArmed(true))}
+        style={styles.deleteAccountButton}
+      >
+        <Text style={styles.deleteAccountText}>
+          {deleteArmed ? 'Tap again to delete account' : 'Delete account'}
+        </Text>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -2570,6 +2611,17 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
     marginTop: 2
+  },
+  deleteAccountButton: {
+    alignSelf: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 8
+  },
+  deleteAccountText: {
+    color: COLORS.cardinal,
+    fontSize: 14,
+    fontWeight: '800'
   },
   pantryTypeRow: {
     flexDirection: 'row',

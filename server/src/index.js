@@ -19,7 +19,7 @@ import {
   setCachedPlan,
   stampUncachedResponse
 } from './planCache.js';
-import { confirmSignup, createSignup } from './users.js';
+import { confirmSignup, createSignup, deleteSignup } from './users.js';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -85,6 +85,15 @@ app.get('/api/confirm-email', async (req, res) => {
     title: 'Email confirmed',
     message: `Thanks, ${user.name}. You can return to CutPlate Cardinal.`
   }));
+});
+
+app.post('/api/delete-account', async (req, res, next) => {
+  try {
+    await deleteSignup(req.body?.email);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post('/api/plan', async (req, res) => {

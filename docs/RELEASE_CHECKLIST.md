@@ -54,7 +54,7 @@ npm run eas:ios:submit
 ## App Store Review Notes
 
 - Add a privacy policy URL and support URL before submission.
-- Because the app creates accounts, add an in-app account deletion path before App Store review.
+- Because the app creates accounts, keep the in-app account deletion path working before every App Store review.
 - Email confirmation needs a production email sender. The server supports Resend with `RESEND_API_KEY` and `EMAIL_FROM`.
 - Keep OpenAI and email keys on the server or in EAS/server secrets. Never expose them through `EXPO_PUBLIC_` variables.
 - Recipe macros, prices, and shopping lists should remain clearly labeled as estimates.
