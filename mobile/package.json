@@ -13,6 +13,7 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~54.0.34",
     "expo-status-bar": "~3.0.9",
+    "expo-updates": "~29.0.17",
     "lucide-react-native": "^1.11.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -20,8 +21,5 @@
     "react-native-svg": "15.12.1",
     "react-native-web": "^0.21.0"
   },
-  "private": true,
-  "devDependencies": {
-    "eas-cli": "^18.9.1"
-  }
+  "private": true
 }

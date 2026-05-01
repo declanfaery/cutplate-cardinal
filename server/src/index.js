@@ -20,6 +20,7 @@ import {
   stampUncachedResponse
 } from './planCache.js';
 import { confirmSignup, createSignup, deleteSignup } from './users.js';
+import { buildPantryRecipes } from './pantryRecipes.js';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -91,6 +92,14 @@ app.post('/api/delete-account', async (req, res, next) => {
   try {
     await deleteSignup(req.body?.email);
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/pantry-recipes', (req, res, next) => {
+  try {
+    res.json(buildPantryRecipes(req.body || {}));
   } catch (error) {
     next(error);
   }

@@ -12,9 +12,9 @@
     "ios": "npm run ios --prefix mobile",
     "test": "npm run test --prefix server",
     "check": "npm run test --prefix server && node --check mobile/App.js",
-    "eas:ios:stage": "cd mobile && npx eas build -p ios --profile preview",
-    "eas:ios:prod": "cd mobile && npx eas build -p ios --profile production",
-    "eas:ios:submit": "cd mobile && npx eas submit -p ios --profile production"
+    "eas:ios:stage": "cd mobile && npx eas-cli build -p ios --profile preview",
+    "eas:ios:prod": "cd mobile && npx eas-cli build -p ios --profile production",
+    "eas:ios:submit": "cd mobile && npx eas-cli submit -p ios --profile production"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

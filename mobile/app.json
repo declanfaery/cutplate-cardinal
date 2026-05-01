@@ -37,6 +37,12 @@
         "projectId": "3e45d52b-5f9e-4a0b-b106-e629e8523142"
       }
     },
-    "owner": "d2clan"
+    "owner": "d2clan",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/3e45d52b-5f9e-4a0b-b106-e629e8523142"
+    }
   }
 }

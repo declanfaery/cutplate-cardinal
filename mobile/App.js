@@ -100,7 +100,7 @@ const ONBOARDING_SLIDES = [
   },
   {
     title: 'Use what is already home.',
-    body: 'Enter pantry or fridge ingredients and CutPlate can surface recipe matches from the saved recipe library.'
+    body: 'Enter pantry or fridge ingredients and CutPlate can build meal ideas around those items plus small seasonings.'
   }
 ];
 
@@ -141,6 +141,10 @@ export default function App() {
   const [menuPricing, setMenuPricing] = useState({ selectedTotal: 0, marginalCosts: {} });
   const [cachedRecipes, setCachedRecipes] = useState([]);
   const [pantryMealType, setPantryMealType] = useState('Dinner');
+  const [pantryRecipes, setPantryRecipes] = useState([]);
+  const [isPantrySearching, setIsPantrySearching] = useState(false);
+  const [pantrySearchError, setPantrySearchError] = useState('');
+  const [pantrySearchNote, setPantrySearchNote] = useState('');
   const [error, setError] = useState('');
   const pricingRequestId = useRef(0);
 
@@ -221,6 +225,9 @@ export default function App() {
     setPlan(null);
     setSelectedMenuPlan(null);
     setSelectedMealIds([]);
+    setPantryRecipes([]);
+    setPantrySearchError('');
+    setPantrySearchNote('');
     setAppMode('pantry');
   };
 
@@ -285,6 +292,60 @@ export default function App() {
     setWarnings([]);
     setError('');
     setAppMode('home');
+  };
+
+  const updatePantryFinderIngredients = (value) => {
+    setPantryIngredients(value);
+    setPantryRecipes([]);
+    setPantrySearchError('');
+    setPantrySearchNote('');
+  };
+
+  const updatePantryFinderMealType = (mealType) => {
+    setPantryMealType(mealType);
+    setPantryRecipes([]);
+    setPantrySearchError('');
+    setPantrySearchNote('');
+  };
+
+  const findPantryRecipes = async () => {
+    const ingredients = pantryIngredients.trim();
+
+    setPantrySearchError('');
+    setPantrySearchNote('');
+
+    if (!ingredients) {
+      setPantrySearchError('Enter what you have first.');
+      return;
+    }
+
+    setIsPantrySearching(true);
+
+    try {
+      const response = await fetchWithRetry(`${API_URL}/api/pantry-recipes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ingredients,
+          mealType: pantryMealType,
+          allergies,
+          dietStyle,
+          calorieTarget: Number(calorieTarget)
+        })
+      }, 1);
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const data = await response.json();
+      setPantryRecipes(Array.isArray(data.recipes) ? data.recipes : []);
+      setPantrySearchNote(data.note || '');
+    } catch (requestError) {
+      setPantrySearchError(formatApiFailure('Could not build pantry meals', requestError));
+    } finally {
+      setIsPantrySearching(false);
+    }
   };
 
   const deleteAccount = async () => {
@@ -765,11 +826,14 @@ export default function App() {
         ) : appMode === 'pantry' ? (
           <PantryFinderScreen
             pantryIngredients={pantryIngredients}
-            setPantryIngredients={setPantryIngredients}
+            setPantryIngredients={updatePantryFinderIngredients}
             pantryMealType={pantryMealType}
-            setPantryMealType={setPantryMealType}
-            cachedRecipes={cachedRecipes}
-            onStartGuided={startGuidedPlan}
+            setPantryMealType={updatePantryFinderMealType}
+            pantryRecipes={pantryRecipes}
+            onFindRecipes={findPantryRecipes}
+            isLoading={isPantrySearching}
+            error={pantrySearchError}
+            note={pantrySearchNote}
           />
         ) : (
           <ScrollView
@@ -1453,7 +1517,7 @@ function HomeScreen({ viewer, calendarMeals, onStartGuided, onStartPantry, onDel
           </View>
           <View style={styles.homeActionText}>
             <Text style={styles.homeActionTitle}>Find recipes from my pantry</Text>
-            <Text style={styles.homeActionSub}>Enter ingredients you have, then browse cached recipe matches.</Text>
+            <Text style={styles.homeActionSub}>Enter what you have, then build meal ideas around those ingredients.</Text>
           </View>
         </Pressable>
       </View>
@@ -1521,13 +1585,13 @@ function PantryFinderScreen({
   setPantryIngredients,
   pantryMealType,
   setPantryMealType,
-  cachedRecipes,
-  onStartGuided
+  pantryRecipes,
+  onFindRecipes,
+  isLoading,
+  error,
+  note
 }) {
-  const pantryList = splitIngredientList(pantryIngredients);
-  const matches = cachedRecipes
-    .filter((recipe) => !pantryMealType || recipe.mealType === pantryMealType)
-    .sort((a, b) => scoreRecipeForIngredients(b, pantryList) - scoreRecipeForIngredients(a, pantryList));
+  const hasIngredients = pantryIngredients.trim().length > 0;
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.homeScroll}>
@@ -1535,7 +1599,7 @@ function PantryFinderScreen({
         <View style={styles.menuGuideRow}>
           <CardinalMascot compact active={false} />
           <View style={styles.guideBubble}>
-            <Text style={styles.guideText}>Tell me what you already have, and I will surface cached recipes that use it.</Text>
+            <Text style={styles.guideText}>Tell me what you already have. I will build meals from those items plus small seasonings or sauces.</Text>
           </View>
         </View>
         <Text style={styles.homeTitle}>What is in your pantry?</Text>
@@ -1562,39 +1626,77 @@ function PantryFinderScreen({
         ))}
       </View>
 
-      <CachedRecipeShelf
-        recipes={matches}
-        title={pantryIngredients.trim() ? 'Pantry matches' : 'Cached recipes'}
-        emptyText="No cached matches yet. Build a meal plan first, then this gets smarter."
-        showDetails
-      />
-
-      <Pressable onPress={onStartGuided} style={styles.homePlanButton}>
-        <Text style={styles.homePlanButtonText}>Build a full plan with these</Text>
+      <Pressable
+        onPress={onFindRecipes}
+        disabled={!hasIngredients || isLoading}
+        style={[styles.homePlanButton, (!hasIngredients || isLoading) && styles.continueDisabled]}
+      >
+        {isLoading ? <ActivityIndicator color={COLORS.white} /> : null}
+        <Text style={styles.homePlanButtonText}>{isLoading ? 'Building meals' : 'Find meals from pantry'}</Text>
       </Pressable>
+
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {note && pantryRecipes.length ? <Text style={styles.pantryNote}>{note}</Text> : null}
+
+      <PantryRecipeResults
+        hasIngredients={hasIngredients}
+        recipes={pantryRecipes}
+        isLoading={isLoading}
+      />
     </ScrollView>
   );
 }
 
-function CachedRecipeShelf({ recipes, title, emptyText, showDetails = false }) {
+function PantryRecipeResults({ hasIngredients, recipes = [], isLoading }) {
+  if (!hasIngredients) {
+    return (
+      <View style={styles.pantryEmptyPanel}>
+        <Text style={styles.cachedHomeTitle}>Start with ingredients</Text>
+        <Text style={styles.cachedEmpty}>Example: chicken breast, rice, broccoli, salsa.</Text>
+      </View>
+    );
+  }
+
+  if (isLoading) return null;
+
+  if (!recipes.length) {
+    return (
+      <View style={styles.pantryEmptyPanel}>
+        <Text style={styles.cachedHomeTitle}>No pantry meals yet</Text>
+        <Text style={styles.cachedEmpty}>Tap Find meals from pantry and I will build options from what you entered.</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.cachedHome}>
-      <Text style={styles.cachedHomeTitle}>{title}</Text>
-      {recipes.slice(0, showDetails ? 12 : 6).map((recipe) => (
-        <View key={recipe.optionKey || recipe.id || recipe.name} style={styles.cachedHomeItem}>
-          <Text style={styles.cachedHomeName} numberOfLines={1}>{recipe.name}</Text>
-          <Text style={styles.cachedHomeMeta}>
-            {recipe.mealType} - {recipe.macros?.calories || 0} cals
-            {showDetails && recipe.pantryScore ? ` - ${recipe.pantryScore} pantry match${recipe.pantryScore === 1 ? '' : 'es'}` : ''}
-          </Text>
-          {showDetails ? (
-            <Text style={styles.cachedHomeIngredients} numberOfLines={2}>
-              {(recipe.ingredients || []).slice(0, 5).join(', ')}
-            </Text>
-          ) : null}
+    <View style={styles.pantryResults}>
+      <Text style={styles.cachedHomeTitle}>Pantry meals</Text>
+      {recipes.map((recipe) => (
+        <View key={recipe.id || recipe.name} style={styles.pantryRecipeCard}>
+          <View style={styles.recipeTop}>
+            <View>
+              <Text style={styles.recipeType}>{recipe.mealType}</Text>
+              <Text style={styles.pantryRecipeName}>{recipe.name}</Text>
+            </View>
+            <Text style={styles.ratingPill}>{recipe.macroRating || 'FIT'}</Text>
+          </View>
+          <Text style={styles.recipeDescription}>{recipe.description}</Text>
+          <View style={styles.macroRow}>
+            <Macro label="Cals" value={recipe.macros?.calories || 0} />
+            <Macro label="P" value={`${recipe.macros?.protein || 0}g`} />
+            <Macro label="C" value={`${recipe.macros?.carbs || 0}g`} />
+            <Macro label="F" value={`${recipe.macros?.fat || 0}g`} />
+          </View>
+          <Text style={styles.moduleTitle}>Ingredients</Text>
+          {(recipe.ingredients || []).map((ingredient) => (
+            <Text key={ingredient} style={styles.recipeText}>{ingredient}</Text>
+          ))}
+          <Text style={styles.moduleTitle}>Steps</Text>
+          {(recipe.steps || []).map((step, index) => (
+            <Text key={step} style={styles.recipeText}>{index + 1}. {step}</Text>
+          ))}
         </View>
       ))}
-      {!recipes.length ? <Text style={styles.cachedEmpty}>{emptyText}</Text> : null}
     </View>
   );
 }
@@ -2629,6 +2731,39 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 14,
     marginBottom: 16
+  },
+  pantryNote: {
+    color: COLORS.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '700',
+    marginTop: 14
+  },
+  pantryEmptyPanel: {
+    backgroundColor: COLORS.pale2,
+    borderRadius: 20,
+    padding: 16,
+    marginTop: 16
+  },
+  pantryResults: {
+    backgroundColor: COLORS.pale2,
+    borderRadius: 20,
+    padding: 16,
+    gap: 12,
+    marginTop: 16
+  },
+  pantryRecipeCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 16,
+    padding: 16,
+    gap: 11
+  },
+  pantryRecipeName: {
+    color: COLORS.ink,
+    fontSize: 21,
+    lineHeight: 26,
+    fontWeight: '900',
+    marginTop: 3
   },
   stepHeader: {
     marginBottom: 26
