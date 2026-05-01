@@ -8,3 +8,4 @@ server/.cache/
 dist/
 build/
 .expo/
+netlify_deploy_work_*/
