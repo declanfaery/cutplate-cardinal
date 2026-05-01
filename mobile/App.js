@@ -330,7 +330,8 @@ export default function App() {
           mealType: pantryMealType,
           allergies,
           dietStyle,
-          calorieTarget: Number(calorieTarget)
+          calorieTarget: Number(calorieTarget),
+          sourceHandles
         })
       }, 1);
 
@@ -666,7 +667,7 @@ export default function App() {
     );
 
     if (!candidates.length) {
-      setError('No cached swap options match that meal slot yet.');
+      setError('No swap options match that meal slot yet.');
       return;
     }
 
@@ -1674,7 +1675,7 @@ function PantryRecipeResults({ hasIngredients, recipes = [], isLoading }) {
       {recipes.map((recipe) => (
         <View key={recipe.id || recipe.name} style={styles.pantryRecipeCard}>
           <View style={styles.recipeTop}>
-            <View>
+            <View style={styles.recipeTitleBlock}>
               <Text style={styles.recipeType}>{recipe.mealType}</Text>
               <Text style={styles.pantryRecipeName}>{recipe.name}</Text>
             </View>
@@ -1695,6 +1696,16 @@ function PantryRecipeResults({ hasIngredients, recipes = [], isLoading }) {
           {(recipe.steps || []).map((step, index) => (
             <Text key={step} style={styles.recipeText}>{index + 1}. {step}</Text>
           ))}
+          {recipe.sources?.length ? (
+            <View style={styles.sourceRow}>
+              {recipe.sources.map((source) => (
+                <Pressable key={source.url || source.label} onPress={() => source.url && Linking.openURL(source.url)} style={styles.sourcePill}>
+                  <Text style={styles.sourceText}>{formatSourceLabel(source.label)}</Text>
+                  <ExternalLink color={COLORS.cardinal} size={13} />
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </View>
       ))}
     </View>
@@ -2345,7 +2356,7 @@ function RecipeModule({ meal, onSwap, isSwapping }) {
   return (
     <View style={styles.recipeModule}>
       <View style={styles.recipeTop}>
-        <View>
+        <View style={styles.recipeTitleBlock}>
           <Text style={styles.recipeType}>
             {meal.mealType} at {meal.time}
           </Text>
@@ -2760,10 +2771,11 @@ const styles = StyleSheet.create({
   },
   pantryRecipeName: {
     color: COLORS.ink,
-    fontSize: 21,
-    lineHeight: 26,
+    fontSize: 20,
+    lineHeight: 25,
     fontWeight: '900',
-    marginTop: 3
+    marginTop: 3,
+    flexShrink: 1
   },
   stepHeader: {
     marginBottom: 26
@@ -3507,7 +3519,13 @@ const styles = StyleSheet.create({
   recipeTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
     gap: 12
+  },
+  recipeTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 4
   },
   recipeType: {
     color: COLORS.cardinal,
@@ -3520,7 +3538,8 @@ const styles = StyleSheet.create({
     fontSize: 23,
     lineHeight: 29,
     fontWeight: '900',
-    marginTop: 3
+    marginTop: 3,
+    flexShrink: 1
   },
   ratingPill: {
     color: COLORS.cardinalDark,
@@ -3531,7 +3550,10 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     fontSize: 12,
     fontWeight: '900',
-    alignSelf: 'flex-start'
+    alignSelf: 'flex-start',
+    flexShrink: 0,
+    maxWidth: 96,
+    textAlign: 'center'
   },
   recipeDescription: {
     color: COLORS.muted,

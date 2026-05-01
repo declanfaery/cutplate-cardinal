@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const CACHE_VERSION = 'cutplate-plan-cache-v5';
+const CACHE_VERSION = 'cutplate-plan-cache-v6';
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -200,6 +200,7 @@ function buildPlanFingerprint(preferences = {}) {
     dietStyle: normalizeText(preferences.dietStyle),
     avoidIngredients: normalizeText(preferences.avoidIngredients),
     pantryIngredients: normalizeText(preferences.pantryIngredients),
+    recipeMode: normalizeText(preferences.recipeMode),
     weekdaysOnly: Boolean(preferences.weekdaysOnly),
     sourceHandles: normalizeList(preferences.sourceHandles)
   };

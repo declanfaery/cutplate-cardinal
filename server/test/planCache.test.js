@@ -135,3 +135,17 @@ test('plan cache key reuses nearby budgets in the same budget tier', () => {
   assert.equal(buildPlanCacheKey(standardA), buildPlanCacheKey(standardB));
   assert.notEqual(buildPlanCacheKey(standardA), buildPlanCacheKey(highBudget));
 });
+
+test('plan cache separates pantry-sourced recipe matches from full meal plans', () => {
+  const shared = normalizePreferences({
+    days: 3,
+    proteins: ['Chicken'],
+    mealSlots: [{ type: 'Dinner', time: '6:30 PM' }],
+    pantryIngredients: 'chicken breast, rice, broccoli'
+  });
+
+  assert.notEqual(
+    buildPlanCacheKey(shared),
+    buildPlanCacheKey({ ...shared, recipeMode: 'pantry-sourced' })
+  );
+});

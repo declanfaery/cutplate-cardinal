@@ -2,7 +2,7 @@ import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
 import { buildMealPlan, normalizePreferences } from './recipeEngine.js';
-import { generateAiMealPlan } from './openaiPlanner.js';
+import { generateAiMealPlan, generateSourcedPantryRecipes } from './openaiPlanner.js';
 import { CREATOR_SOURCES, SOURCE_POLICY_NOTES } from './sources.js';
 import {
   attachGroceryEstimate,
@@ -10,7 +10,6 @@ import {
   buildSelectedMealPlan,
   estimateSelectionPricing
 } from './costEstimator.js';
-import { attachRecipeLibrary } from './recipeLibrary.js';
 import {
   buildPlanCacheKey,
   getCacheSettings,
@@ -20,7 +19,6 @@ import {
   stampUncachedResponse
 } from './planCache.js';
 import { confirmSignup, createSignup, deleteSignup } from './users.js';
-import { buildPantryRecipes } from './pantryRecipes.js';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -97,9 +95,89 @@ app.post('/api/delete-account', async (req, res, next) => {
   }
 });
 
-app.post('/api/pantry-recipes', (req, res, next) => {
+app.post('/api/pantry-recipes', async (req, res, next) => {
   try {
-    res.json(buildPantryRecipes(req.body || {}));
+    const pantryIngredients = String(req.body?.ingredients || req.body?.pantryIngredients || '').trim();
+    if (!pantryIngredients) {
+      return res.status(400).json({ error: 'Enter pantry or fridge ingredients first.' });
+    }
+
+    const mealType = normalizePantryMealType(req.body?.mealType);
+    const preferences = {
+      ...normalizePreferences({
+        days: 3,
+        proteins: [],
+        mealSlots: [{ type: mealType, time: '' }],
+        allergies: req.body?.allergies || [],
+        calorieTarget: req.body?.calorieTarget,
+        dietStyle: req.body?.dietStyle || 'High protein',
+        pantryIngredients,
+        sourceHandles: req.body?.sourceHandles || []
+      }),
+      days: 0,
+      proteins: [],
+      recipeMode: 'pantry-sourced',
+      pantryIngredients
+    };
+    const cached = await getCachedPlan(preferences);
+
+    if (cached?.plan?.recipeLibrary?.length) {
+      return res.json({
+        recipes: cached.plan.recipeLibrary,
+        usedIngredients: splitPantryIngredients(pantryIngredients),
+        note: 'Found previously gathered source matches for those pantry ingredients.',
+        cache: cached.cache
+      });
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({
+        error: 'Sourced recipe gathering is not configured. Add OPENAI_API_KEY and try again.'
+      });
+    }
+
+    const pantryResponse = await generateSourcedPantryRecipes({
+      ...req.body,
+      ingredients: pantryIngredients,
+      pantryIngredients,
+      mealType
+    });
+    const cacheResponse = {
+      mode: 'sourced',
+      warnings: [],
+      plan: {
+        id: `pantry-${Date.now()}`,
+        title: `${mealType} pantry recipe matches`,
+        generatedAt: new Date().toISOString(),
+        generatedBy: process.env.OPENAI_MODEL || 'gpt-5-nano',
+        preferences,
+        summary: {
+          days: 0,
+          mealsPerDay: 0,
+          totalMeals: pantryResponse.recipes.length,
+          averageCalories: averageRecipeMacro(pantryResponse.recipes, 'calories'),
+          averageProtein: averageRecipeMacro(pantryResponse.recipes, 'protein'),
+          averageCarbs: averageRecipeMacro(pantryResponse.recipes, 'carbs'),
+          averageFat: averageRecipeMacro(pantryResponse.recipes, 'fat')
+        },
+        days: [],
+        recipeLibrary: pantryResponse.recipes,
+        shoppingList: [],
+        sourceNotes: SOURCE_POLICY_NOTES,
+        safetyNote:
+          'Recipes and macros are planning estimates from public source discovery. Confirm exact products and cook proteins to food-safe temperatures.'
+      }
+    };
+
+    await setCachedPlan(preferences, cacheResponse);
+
+    return res.json({
+      ...pantryResponse,
+      cache: {
+        hit: false,
+        key: buildPlanCacheKey(preferences)
+      }
+    });
   } catch (error) {
     next(error);
   }
@@ -121,7 +199,7 @@ app.post('/api/plan', async (req, res) => {
       const localPlan = buildMealPlan(preferences);
       const localResponse = {
         plan: localPlan,
-        warnings: ['Showing budget-aware starter recipes now. A richer creator-guided menu is being cached for these choices.'],
+        warnings: ['Showing local development recipes because ALLOW_LOCAL_RECIPE_FALLBACK is enabled.'],
         mode: 'local'
       };
       return res.json(stampUncachedResponse(localResponse, preferences));
@@ -142,10 +220,16 @@ app.post('/api/plan', async (req, res) => {
     }
   }
 
+  if (!shouldAllowLocalFallback()) {
+    return res.status(503).json({
+      error: 'Sourced recipe gathering is not configured. Add OPENAI_API_KEY and try again.'
+    });
+  }
+
   const localPlan = buildMealPlan(preferences);
   const localResponse = {
     plan: localPlan,
-    warnings: ['Connected recipe gathering is not configured, so this plan used the local recipe engine.'],
+    warnings: ['Showing local development recipes because ALLOW_LOCAL_RECIPE_FALLBACK is enabled.'],
     mode: 'local'
   };
   await setCachedPlan(preferences, localResponse);
@@ -218,7 +302,7 @@ function getOrStartAiPlan(preferences) {
 }
 
 async function buildAiPlanResponse(preferences) {
-  const aiPlan = attachGroceryEstimate(attachRecipeLibrary(await generateAiMealPlan(preferences), preferences), preferences);
+  const aiPlan = attachGroceryEstimate(await generateAiMealPlan(preferences), preferences);
   return {
     plan: aiPlan,
     warnings: [],
@@ -246,6 +330,10 @@ function withTimeout(promise, timeoutMs, message) {
 }
 
 function getAiTimeoutMs() {
+  if (!/^(1|true|yes)$/i.test(String(process.env.PLAN_ALLOW_TIMEOUT || 'false'))) {
+    return null;
+  }
+
   const rawValue = String(process.env.PLAN_AI_TIMEOUT_MS || '').trim();
   if (!rawValue) return null;
 
@@ -254,19 +342,45 @@ function getAiTimeoutMs() {
 }
 
 function shouldReturnFastFirst() {
-  return /^(1|true|yes)$/i.test(String(process.env.PLAN_FAST_FIRST || 'false'));
+  return shouldAllowLocalFallback() && /^(1|true|yes)$/i.test(String(process.env.PLAN_FAST_FIRST || 'false'));
 }
 
 function shouldUseWebSearch() {
-  return /^(1|true|yes)$/i.test(String(process.env.PLAN_WEB_SEARCH || 'false'));
+  return !/^(0|false|no)$/i.test(String(process.env.PLAN_WEB_SEARCH_DISABLED || ''));
+}
+
+function shouldAllowLocalFallback() {
+  return /^(1|true|yes)$/i.test(String(process.env.ALLOW_LOCAL_RECIPE_FALLBACK || 'false'));
 }
 
 function getAiPlanError(error) {
   if (error?.code === 'ETIMEDOUT') {
-    return 'Recipes are still being gathered and cached for these choices. Try Generate again in a moment.';
+    return 'Recipe gathering took longer than the configured timeout.';
   }
 
   return `Recipe gathering failed: ${error.message}`;
+}
+
+function normalizePantryMealType(value = '') {
+  const normalized = String(value || 'Dinner').trim().toLowerCase();
+  const match = ['breakfast', 'lunch', 'dinner', 'snack'].find((mealType) => mealType === normalized);
+  return match ? `${match.charAt(0).toUpperCase()}${match.slice(1)}` : 'Dinner';
+}
+
+function splitPantryIngredients(value = '') {
+  return String(value || '')
+    .split(/[,;\n]/)
+    .map((ingredient) => ingredient.trim())
+    .filter(Boolean);
+}
+
+function averageRecipeMacro(recipes = [], key) {
+  const values = recipes
+    .map((recipe) => Number(recipe.macros?.[key]))
+    .filter((value) => Number.isFinite(value));
+
+  if (!values.length) return 0;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
 function buildEmailConfirmationPage({ title, message }) {

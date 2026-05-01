@@ -2,10 +2,57 @@ import OpenAI from 'openai';
 import { SOURCE_POLICY_NOTES, getSourceSeeds } from './sources.js';
 import { normalizePreferences } from './recipeEngine.js';
 
+const RECIPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id',
+    'mealType',
+    'time',
+    'name',
+    'protein',
+    'description',
+    'macroRating',
+    'prepTime',
+    'macros',
+    'ingredients',
+    'steps',
+    'sources',
+    'sourceSearches'
+  ],
+  properties: {
+    id: { type: 'string' },
+    mealType: { type: 'string' },
+    time: { type: 'string' },
+    name: { type: 'string' },
+    protein: { type: 'string' },
+    description: { type: 'string' },
+    macroRating: { type: 'string' },
+    prepTime: { type: 'string' },
+    macros: macroSchema(),
+    ingredients: { type: 'array', items: { type: 'string' } },
+    steps: { type: 'array', items: { type: 'string' } },
+    sources: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['label', 'url', 'platform'],
+        properties: {
+          label: { type: 'string' },
+          url: { type: 'string' },
+          platform: { type: 'string' }
+        }
+      }
+    },
+    sourceSearches: { type: 'array', items: { type: 'string' } }
+  }
+};
+
 const PLAN_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'summary', 'days', 'shoppingList', 'sourceNotes', 'safetyNote'],
+  required: ['title', 'summary', 'days', 'recipeLibrary', 'shoppingList', 'sourceNotes', 'safetyNote'],
   properties: {
     title: { type: 'string' },
     summary: {
@@ -34,59 +81,26 @@ const PLAN_SCHEMA = {
           totals: macroSchema(),
           meals: {
             type: 'array',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              required: [
-                'id',
-                'mealType',
-                'time',
-                'name',
-                'protein',
-                'description',
-                'macroRating',
-                'prepTime',
-                'macros',
-                'ingredients',
-                'steps',
-                'sources',
-                'sourceSearches'
-              ],
-              properties: {
-                id: { type: 'string' },
-                mealType: { type: 'string' },
-                time: { type: 'string' },
-                name: { type: 'string' },
-                protein: { type: 'string' },
-                description: { type: 'string' },
-                macroRating: { type: 'string' },
-                prepTime: { type: 'string' },
-                macros: macroSchema(),
-                ingredients: { type: 'array', items: { type: 'string' } },
-                steps: { type: 'array', items: { type: 'string' } },
-                sources: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    additionalProperties: false,
-                    required: ['label', 'url', 'platform'],
-                    properties: {
-                      label: { type: 'string' },
-                      url: { type: 'string' },
-                      platform: { type: 'string' }
-                    }
-                  }
-                },
-                sourceSearches: { type: 'array', items: { type: 'string' } }
-              }
-            }
+            items: RECIPE_SCHEMA
           }
         }
       }
     },
+    recipeLibrary: { type: 'array', items: RECIPE_SCHEMA },
     shoppingList: { type: 'array', items: { type: 'string' } },
     sourceNotes: { type: 'array', items: { type: 'string' } },
     safetyNote: { type: 'string' }
+  }
+};
+
+const PANTRY_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['recipes', 'usedIngredients', 'note'],
+  properties: {
+    recipes: { type: 'array', items: RECIPE_SCHEMA },
+    usedIngredients: { type: 'array', items: { type: 'string' } },
+    note: { type: 'string' }
   }
 };
 
@@ -101,8 +115,8 @@ export async function generateAiMealPlan(input = {}) {
 
   const useWebSearch = shouldUseWebSearch();
   const discoveryInstruction = sourceSeeds.length
-    ? `${useWebSearch ? 'Use web search for inspiration and source discovery,' : 'Use the provided social recipe seeds for style and discovery context,'} but do not copy creator captions, recipes, or post text.`
-    : 'Use general healthy recipe knowledge and do not copy creator captions, recipes, or post text.';
+    ? 'Use web search for recipe/source discovery across the public web and the selected public social creator seeds, but do not copy creator captions, recipes, or post text.'
+    : 'Use web search for recipe/source discovery across the public web. Do not copy creator captions, recipes, or post text.';
   const response = await client.responses.create({
     model: process.env.OPENAI_MODEL || 'gpt-5-nano',
     input: [
@@ -124,7 +138,7 @@ export async function generateAiMealPlan(input = {}) {
             text: JSON.stringify(
               {
                 task:
-                  'Create a complete meal plan with recipes, ingredients, steps, estimated per-serving macros, source links, and shopping list. Calories should usually be 300-520 for breakfast, 380-620 for lunch, 430-680 for dinner, and 140-320 for snacks. Protein should usually be 25-60g for meals and 15-32g for snacks. Use the groceryBudget preference before choosing recipes. Treat the budget as the full selected menu budget, then divide by days * selected meal slots to reason about budget per recipe. Low budgets under about $7 per recipe should lean on 93% lean ground turkey, chicken thighs, eggs, pasta, rice, beans, and frozen vegetables. Higher budgets around $10+ per recipe can and should include some premium choices like steak, salmon, shrimp, quinoa, and higher-cost vegetables. If pantryIngredients are provided, prefer recipes that naturally use those ingredients without forcing them into every meal. List every seasoning and sauce as its own measured ingredient using tbsp or tsp, for example 1 tbsp lime juice, 1/2 tsp chili powder, 1/4 tsp kosher salt, and 1/4 tsp black pepper. Do not use vague ingredients like seasonings, spices, or sauce to taste.',
+                  'Create a complete meal plan and a selectable recipeLibrary of 25-50 sourced recipe options. Use web-discovered recipes and public recipe/social inspiration as source material, then summarize/adapt in original words. Do not create repeated template names like Lime Chili Protein Bowl or Garlic Herb Protein Plate. Recipe names should reflect the actual food and source concept. Use source nutrition/macros when available; otherwise estimate per-serving macros from ingredient amounts. Do not use the same calorie number for every recipe. Use the groceryBudget preference before choosing recipes. Treat the budget as the full selected menu budget, then divide by days * selected meal slots to reason about budget per recipe. Low budgets should lean on lower-cost real recipes and staples. Higher budgets can include premium recipes like steak, salmon, shrimp, quinoa, and higher-cost vegetables. If pantryIngredients are provided, prefer recipes that naturally use those ingredients without forcing them into every meal. List every seasoning and sauce as its own measured ingredient using tbsp or tsp. Do not use vague ingredients like seasonings, spices, or sauce to taste.',
                 preferences,
                 sourceSeeds,
                 sourcePolicy: SOURCE_POLICY_NOTES,
@@ -138,7 +152,7 @@ export async function generateAiMealPlan(input = {}) {
         ]
       }
     ],
-    ...(useWebSearch ? { tools: [{ type: 'web_search_preview', search_context_size: 'low' }] } : {}),
+    ...(useWebSearch ? { tools: [{ type: 'web_search_preview', search_context_size: getSearchContextSize() }] } : {}),
     reasoning: { effort: process.env.OPENAI_REASONING_EFFORT || 'low' },
     text: {
       format: {
@@ -165,8 +179,103 @@ export async function generateAiMealPlan(input = {}) {
   };
 }
 
+export async function generateSourcedPantryRecipes(input = {}) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not configured.');
+  }
+
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const mealType = String(input.mealType || 'Dinner').trim() || 'Dinner';
+  const pantryIngredients = String(input.ingredients || input.pantryIngredients || '').trim();
+  const sourceSeeds = getSourceSeeds(input.sourceHandles || []);
+
+  if (!pantryIngredients) {
+    const error = new Error('Enter pantry or fridge ingredients first.');
+    error.status = 400;
+    throw error;
+  }
+
+  const response = await client.responses.create({
+    model: process.env.OPENAI_MODEL || 'gpt-5-nano',
+    input: [
+      {
+        role: 'developer',
+        content: [
+          {
+            type: 'input_text',
+            text:
+              'You find real recipe ideas from the public web and selected public social recipe sources, then return original summaries for a pantry-first cooking app. Do not copy recipe pages, captions, or creator text. Every returned recipe must be built primarily around the user pantry ingredients, with only small pantry-staple additions like measured spices, citrus, sauces, or salt/pepper. Return only valid JSON matching the schema.'
+          }
+        ]
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: JSON.stringify(
+              {
+                task:
+                  'Find and summarize real recipe options for the requested meal type using the provided pantry/fridge ingredients as the core. Use the web search tool. The recipe names should be specific to the ingredient combination, not generic flavor templates. Include source links for each recipe. Use source nutrition/macros when available; otherwise estimate per-serving macros from the returned ingredient amounts. List seasonings/sauces with tbsp/tsp measurements.',
+                mealType,
+                pantryIngredients,
+                allergies: input.allergies || [],
+                dietStyle: input.dietStyle || 'High protein',
+                calorieTarget: input.calorieTarget || null,
+                sourceSeeds,
+                sourcePolicy: SOURCE_POLICY_NOTES
+              },
+              null,
+              2
+            )
+          }
+        ]
+      }
+    ],
+    tools: [{ type: 'web_search_preview', search_context_size: getSearchContextSize() }],
+    reasoning: { effort: process.env.OPENAI_REASONING_EFFORT || 'low' },
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'pantry_recipes',
+        strict: true,
+        schema: PANTRY_SCHEMA
+      }
+    }
+  });
+
+  const outputText = response.output_text;
+  if (!outputText) {
+    throw new Error('OpenAI returned empty pantry recipes.');
+  }
+
+  const payload = JSON.parse(outputText);
+  return {
+    ...payload,
+    recipes: payload.recipes.map((recipe, index) => ({
+      ...recipe,
+      id: recipe.id || `pantry-sourced-${index + 1}`,
+      optionKey: recipe.optionKey || recipe.id || `pantry-sourced-${index + 1}`,
+      mealType: recipe.mealType || mealType,
+      time: recipe.time || defaultTime(mealType)
+    }))
+  };
+}
+
 function shouldUseWebSearch() {
-  return /^(1|true|yes)$/i.test(String(process.env.PLAN_WEB_SEARCH || 'false'));
+  return !/^(0|false|no)$/i.test(String(process.env.PLAN_WEB_SEARCH_DISABLED || ''));
+}
+
+function getSearchContextSize() {
+  const value = String(process.env.PLAN_WEB_SEARCH_CONTEXT || 'medium').trim().toLowerCase();
+  return ['low', 'medium', 'high'].includes(value) ? value : 'medium';
+}
+
+function defaultTime(mealType) {
+  if (mealType === 'Breakfast') return '8:00 AM';
+  if (mealType === 'Lunch') return '12:30 PM';
+  if (mealType === 'Snack') return '3:30 PM';
+  return '6:30 PM';
 }
 
 function macroSchema() {
