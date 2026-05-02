@@ -4,6 +4,8 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  InputAccessoryView,
+  Keyboard,
   Linking,
   Platform,
   Pressable,
@@ -89,6 +91,9 @@ const INITIAL_MEAL_SLOTS = [
 ];
 const USER_STORAGE_KEY = 'cutplate:user:v1';
 const CALENDAR_STORAGE_KEY = 'cutplate:calendar:v1';
+const KEYBOARD_ACCESSORY_ID = 'cutplate-keyboard-done';
+const KEYBOARD_DISMISS_MODE = Platform.OS === 'ios' ? 'interactive' : 'on-drag';
+const TEXT_INPUT_DONE_PROPS = Platform.OS === 'ios' ? { inputAccessoryViewID: KEYBOARD_ACCESSORY_ID } : {};
 const ONBOARDING_SLIDES = [
   {
     title: 'Meal plans built around you.',
@@ -735,6 +740,7 @@ export default function App() {
             <Text style={styles.loadingText}>Opening CutPlate Cardinal</Text>
           </View>
         </View>
+        <KeyboardDoneAccessory />
       </SafeAreaView>
     );
   }
@@ -764,6 +770,7 @@ export default function App() {
             notice={signupNotice}
           />
         </View>
+        <KeyboardDoneAccessory />
       </SafeAreaView>
     );
   }
@@ -839,6 +846,7 @@ export default function App() {
         ) : (
           <ScrollView
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={KEYBOARD_DISMISS_MODE}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.stepScroll}
           >
@@ -924,6 +932,7 @@ export default function App() {
           />
         ) : null}
       </View>
+      <KeyboardDoneAccessory />
     </SafeAreaView>
   );
 }
@@ -1018,6 +1027,26 @@ async function fetchWithRetry(url, options = {}, retries = 2) {
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function dismissKeyboard() {
+  if (Platform.OS !== 'web') {
+    Keyboard.dismiss();
+  }
+}
+
+function KeyboardDoneAccessory() {
+  if (Platform.OS !== 'ios') return null;
+
+  return (
+    <InputAccessoryView nativeID={KEYBOARD_ACCESSORY_ID}>
+      <View style={styles.keyboardAccessory}>
+        <Pressable onPress={dismissKeyboard} style={styles.keyboardDoneButton}>
+          <Text style={styles.keyboardDoneText}>Done</Text>
+        </Pressable>
+      </View>
+    </InputAccessoryView>
+  );
 }
 
 async function loadStoredJson(key, fallback) {
@@ -1428,7 +1457,12 @@ function OnboardingScreen({
   const slide = ONBOARDING_SLIDES[Math.min(slideIndex, ONBOARDING_SLIDES.length - 1)];
 
   return (
-    <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.onboardingScroll}>
+    <ScrollView
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode={KEYBOARD_DISMISS_MODE}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.onboardingScroll}
+    >
       <View style={styles.onboardingHero}>
         <CardinalMascot active compact />
         <Text style={styles.homeTitle}>{isSignup ? 'Create your account.' : slide.title}</Text>
@@ -1463,6 +1497,10 @@ function OnboardingScreen({
               placeholderTextColor="#999999"
               autoCapitalize="words"
               style={styles.cleanInput}
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={dismissKeyboard}
+              {...TEXT_INPUT_DONE_PROPS}
             />
           </Field>
           <Field label="Email">
@@ -1474,6 +1512,10 @@ function OnboardingScreen({
               autoCapitalize="none"
               keyboardType="email-address"
               style={styles.cleanInput}
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={dismissKeyboard}
+              {...TEXT_INPUT_DONE_PROPS}
             />
           </Field>
           {notice ? <Text style={styles.successText}>{notice}</Text> : null}
@@ -1492,7 +1534,12 @@ function HomeScreen({ viewer, calendarMeals, onStartGuided, onStartPantry, onDel
   const [deleteArmed, setDeleteArmed] = useState(false);
 
   return (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.homeScroll}>
+    <ScrollView
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode={KEYBOARD_DISMISS_MODE}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.homeScroll}
+    >
       <View style={styles.homeHero}>
         <CardinalMascot compact active />
         <Text style={styles.homeTitle}>What are we cooking?</Text>
@@ -1595,7 +1642,12 @@ function PantryFinderScreen({
   const hasIngredients = pantryIngredients.trim().length > 0;
 
   return (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.homeScroll}>
+    <ScrollView
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode={KEYBOARD_DISMISS_MODE}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.homeScroll}
+    >
       <View style={styles.homeHero}>
         <View style={styles.menuGuideRow}>
           <CardinalMascot compact active={false} />
@@ -1613,6 +1665,10 @@ function PantryFinderScreen({
           placeholder="Example: chicken, rice, broccoli, salsa"
           placeholderTextColor="#999999"
           style={styles.cleanInput}
+          returnKeyType="done"
+          blurOnSubmit
+          onSubmitEditing={dismissKeyboard}
+          {...TEXT_INPUT_DONE_PROPS}
         />
       </Field>
 
@@ -1764,7 +1820,12 @@ function ProteinStep({ selectedProteins, toggleProtein, customProtein, setCustom
           placeholderTextColor="#999999"
           style={styles.cleanInput}
           returnKeyType="done"
-          onSubmitEditing={addCustomProtein}
+          blurOnSubmit
+          onSubmitEditing={() => {
+            addCustomProtein();
+            dismissKeyboard();
+          }}
+          {...TEXT_INPUT_DONE_PROPS}
         />
         <Pressable onPress={addCustomProtein} style={styles.plusButton}>
           <Plus color={COLORS.white} size={22} strokeWidth={3} />
@@ -1816,6 +1877,10 @@ function MealsStep({ mealSlots, updateMealSlot }) {
                 placeholder="Time"
                 placeholderTextColor="#777777"
                 style={styles.timeInput}
+                returnKeyType="done"
+                blurOnSubmit
+                onSubmitEditing={dismissKeyboard}
+                {...TEXT_INPUT_DONE_PROPS}
               />
             </View>
           </View>
@@ -1882,6 +1947,10 @@ function GoalStep({
           placeholder="1800"
           placeholderTextColor="#999999"
           style={styles.cleanInput}
+          returnKeyType="done"
+          blurOnSubmit
+          onSubmitEditing={dismissKeyboard}
+          {...TEXT_INPUT_DONE_PROPS}
         />
       </Field>
       <Field label="Extra avoids">
@@ -1891,6 +1960,10 @@ function GoalStep({
           placeholder="Example: mushrooms, cilantro"
           placeholderTextColor="#999999"
           style={styles.cleanInput}
+          returnKeyType="done"
+          blurOnSubmit
+          onSubmitEditing={dismissKeyboard}
+          {...TEXT_INPUT_DONE_PROPS}
         />
       </Field>
       <Field label="Already in your pantry or fridge">
@@ -1900,6 +1973,10 @@ function GoalStep({
           placeholder="Example: rice, broccoli, salsa, Greek yogurt"
           placeholderTextColor="#999999"
           style={styles.cleanInput}
+          returnKeyType="done"
+          blurOnSubmit
+          onSubmitEditing={dismissKeyboard}
+          {...TEXT_INPUT_DONE_PROPS}
         />
       </Field>
     </View>
@@ -1921,6 +1998,9 @@ function LocationStep({ shoppingLocation, setShoppingLocation }) {
         style={styles.cleanInput}
         autoCapitalize="words"
         returnKeyType="done"
+        blurOnSubmit
+        onSubmitEditing={dismissKeyboard}
+        {...TEXT_INPUT_DONE_PROPS}
       />
       <View style={styles.estimateHint}>
         <DollarSign color={COLORS.greenDark} size={20} strokeWidth={2.6} />
@@ -1949,6 +2029,10 @@ function BudgetPreferenceStep({ budgetTarget, setBudgetTarget }) {
           placeholder="75"
           placeholderTextColor="#999999"
           style={styles.cleanInput}
+          returnKeyType="done"
+          blurOnSubmit
+          onSubmitEditing={dismissKeyboard}
+          {...TEXT_INPUT_DONE_PROPS}
         />
       </Field>
       <View style={styles.budgetStatus}>
@@ -2105,7 +2189,12 @@ function MenuBuilderScreen({
 
   return (
     <View style={styles.menuShell}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.menuScroll}>
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={KEYBOARD_DISMISS_MODE}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.menuScroll}
+      >
         <View style={styles.menuHero}>
           <View style={styles.menuGuideRow}>
             <CardinalMascot active={isEstimating} compact />
@@ -2225,7 +2314,12 @@ function ResultScreen({
   const activeDate = scheduledDates[selectedDay];
 
   return (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.resultScroll}>
+    <ScrollView
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode={KEYBOARD_DISMISS_MODE}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.resultScroll}
+    >
       <View style={styles.resultHero}>
         <View style={styles.menuGuideRow}>
           <CardinalMascot active={isLoading} compact />
@@ -2873,6 +2967,29 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     paddingHorizontal: 18,
     borderWidth: 0
+  },
+  keyboardAccessory: {
+    minHeight: 44,
+    backgroundColor: COLORS.white,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.line,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingHorizontal: 14
+  },
+  keyboardDoneButton: {
+    minHeight: 34,
+    minWidth: 68,
+    borderRadius: 12,
+    backgroundColor: COLORS.cardinal,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14
+  },
+  keyboardDoneText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '900'
   },
   plusButton: {
     width: 58,

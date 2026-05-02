@@ -25,7 +25,7 @@
       "package": "com.cutplate.cardinal",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#31483f"
+        "backgroundColor": "#f4f7f2"
       },
       "edgeToEdgeEnabled": true
     },
