@@ -125,7 +125,7 @@ test('plan cache key reuses nearby budgets in the same budget tier', () => {
       { type: 'Dinner', time: '6:30 PM' }
     ],
     servingsPerMeal: 2,
-    calorieTarget: 1800
+    calorieTarget: 600
   };
 
   const standardA = normalizePreferences({ ...base, groceryBudget: 75 });

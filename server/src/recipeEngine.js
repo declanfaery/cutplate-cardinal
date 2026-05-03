@@ -254,7 +254,14 @@ export function normalizePreferences(input = {}) {
     allergies,
     location: cleanText(input.location, ''),
     groceryBudget: Number.isFinite(groceryBudget) && groceryBudget > 0 ? Math.round(groceryBudget) : null,
-    calorieTarget: Number.isFinite(calorieTarget) && calorieTarget >= 1000 ? Math.round(calorieTarget) : null,
+    calorieTarget: Number.isFinite(calorieTarget) && calorieTarget >= 100 ? Math.round(calorieTarget) : null,
+    calorieTargetBasis: 'per_meal_per_serving',
+    dailyCalorieTarget: Number.isFinite(calorieTarget) && calorieTarget >= 100
+      ? Math.round(calorieTarget * (mealSlots.length > 0 ? mealSlots.length : DEFAULT_MEAL_SLOTS.length))
+      : null,
+    cookedDailyCalorieTarget: Number.isFinite(calorieTarget) && calorieTarget >= 100
+      ? Math.round(calorieTarget * (mealSlots.length > 0 ? mealSlots.length : DEFAULT_MEAL_SLOTS.length) * (Number.isFinite(servingsPerMeal) && servingsPerMeal > 0 ? Math.round(servingsPerMeal) : 2))
+      : null,
     dietStyle: cleanText(input.dietStyle, 'Balanced'),
     avoidIngredients: cleanText(input.avoidIngredients, ''),
     pantryIngredients: cleanText(input.pantryIngredients, ''),

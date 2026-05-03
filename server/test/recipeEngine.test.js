@@ -15,6 +15,29 @@ test('normalizes grocery budget before recipe generation', () => {
   assert.equal(preferences.groceryBudget, 65);
 });
 
+test('normalizes calorie target as per-meal per-serving and derives daily totals', () => {
+  const preferences = normalizePreferences({
+    calorieTarget: '600',
+    servingsPerMeal: 2,
+    mealSlots: [
+      { type: 'Breakfast', time: '8:00 AM' },
+      { type: 'Lunch', time: '12:30 PM' },
+      { type: 'Dinner', time: '6:30 PM' }
+    ]
+  });
+
+  assert.equal(preferences.calorieTarget, 600);
+  assert.equal(preferences.calorieTargetBasis, 'per_meal_per_serving');
+  assert.equal(preferences.dailyCalorieTarget, 1800);
+  assert.equal(preferences.cookedDailyCalorieTarget, 3600);
+});
+
+test('rejects unrealistically tiny calorie targets', () => {
+  const preferences = normalizePreferences({ calorieTarget: '80' });
+
+  assert.equal(preferences.calorieTarget, null);
+});
+
 test('builds a complete plan with requested days and meal slots', () => {
   const plan = buildMealPlan({
     days: 3,
@@ -44,7 +67,7 @@ test('builds a large selectable recipe library with varied per-meal calories', (
       { type: 'Dinner', time: '6:30 PM' },
       { type: 'Snack', time: '3:30 PM' }
     ],
-    calorieTarget: 1800,
+    calorieTarget: 600,
     servingsPerMeal: 2
   });
 
@@ -69,7 +92,7 @@ test('budget changes the generated recipe library mix', () => {
       { type: 'Lunch', time: '12:30 PM' },
       { type: 'Dinner', time: '6:30 PM' }
     ],
-    calorieTarget: 1800,
+    calorieTarget: 600,
     servingsPerMeal: 2
   };
   const lowBudgetPlan = buildMealPlan({ ...baseInput, groceryBudget: 45 });
@@ -90,7 +113,7 @@ test('a high per-meal budget prioritizes premium proteins in the option list', (
     days: 3,
     proteins: ['Chicken', 'Turkey', 'Salmon', 'Beef', 'Greek yogurt', 'Eggs'],
     mealSlots: [{ type: 'Dinner', time: '6:30 PM' }],
-    calorieTarget: 1800,
+    calorieTarget: 600,
     servingsPerMeal: 2,
     groceryBudget: 50
   });

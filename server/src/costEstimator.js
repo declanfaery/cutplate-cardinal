@@ -706,7 +706,8 @@ function normalizeMealNutrition(meal, preferences = {}) {
     Dinner: 820,
     Snack: 380
   };
-  const max = maxByType[meal.mealType] || 750;
+  const target = Number(preferences.calorieTarget || 0);
+  const max = Math.max(maxByType[meal.mealType] || 750, Number.isFinite(target) && target > 0 ? Math.round(target * 1.2) : 0);
   const looksLikeRecipeTotal = servings > 1 && calories > max;
   const divisor = looksLikeRecipeTotal ? servings : 1;
   const divided = {

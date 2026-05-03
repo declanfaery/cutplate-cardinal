@@ -129,7 +129,7 @@ export default function App() {
   const [allergies, setAllergies] = useState([]);
   const [servingsPerMeal, setServingsPerMeal] = useState(2);
   const [dietStyle, setDietStyle] = useState('High protein');
-  const [calorieTarget, setCalorieTarget] = useState('1800');
+  const [calorieTarget, setCalorieTarget] = useState('600');
   const [avoidIngredients, setAvoidIngredients] = useState('');
   const [pantryIngredients, setPantryIngredients] = useState('');
   const [shoppingLocation, setShoppingLocation] = useState('');
@@ -336,6 +336,9 @@ export default function App() {
           allergies,
           dietStyle,
           calorieTarget: Number(calorieTarget),
+          calorieTargetBasis: 'per_meal_per_serving',
+          dailyCalorieTarget: getDailyCalorieTarget(calorieTarget, 1),
+          cookedDailyCalorieTarget: getCookedDailyCalorieTarget(calorieTarget, 1, 1),
           sourceHandles
         })
       }, 1);
@@ -570,6 +573,9 @@ export default function App() {
           allergies,
           dietStyle,
           calorieTarget: Number(calorieTarget),
+          calorieTargetBasis: 'per_meal_per_serving',
+          dailyCalorieTarget: getDailyCalorieTarget(calorieTarget, enabledSlots.length),
+          cookedDailyCalorieTarget: getCookedDailyCalorieTarget(calorieTarget, enabledSlots.length, servingsPerMeal),
           groceryBudget: Number(budgetTarget),
           avoidIngredients: selectedAvoids,
           pantryIngredients,
@@ -886,6 +892,8 @@ export default function App() {
                 setDietStyle={setDietStyle}
                 calorieTarget={calorieTarget}
                 setCalorieTarget={setCalorieTarget}
+                enabledSlots={enabledSlots}
+                servingsPerMeal={servingsPerMeal}
                 avoidIngredients={avoidIngredients}
                 setAvoidIngredients={setAvoidIngredients}
                 pantryIngredients={pantryIngredients}
@@ -1240,6 +1248,27 @@ function splitIngredientList(value = '') {
     .split(',')
     .map((ingredient) => normalizeRecipeName(ingredient))
     .filter(Boolean);
+}
+
+function getDailyCalorieTarget(calorieTarget, mealCount) {
+  const perMeal = Number(calorieTarget || 0);
+  const meals = Math.max(1, Number(mealCount || 1));
+  return Number.isFinite(perMeal) && perMeal > 0 ? Math.round(perMeal * meals) : 0;
+}
+
+function getCookedDailyCalorieTarget(calorieTarget, mealCount, servingsPerMeal) {
+  const daily = getDailyCalorieTarget(calorieTarget, mealCount);
+  const servings = Math.max(1, Number(servingsPerMeal || 1));
+  return daily > 0 ? Math.round(daily * servings) : 0;
+}
+
+function formatCalorieTargetSummary(calorieTarget, mealCount, servingsPerMeal) {
+  const perMeal = Number(calorieTarget || 0);
+  if (!Number.isFinite(perMeal) || perMeal <= 0) return 'no calorie target';
+
+  const daily = getDailyCalorieTarget(perMeal, mealCount);
+  const cookedDaily = getCookedDailyCalorieTarget(perMeal, mealCount, servingsPerMeal);
+  return `${Math.round(perMeal)} cals/meal/serving, ${daily} daily per serving, ${cookedDaily} cooked daily total`;
 }
 
 function scoreRecipeForIngredients(recipe, ingredients = []) {
@@ -1927,11 +1956,16 @@ function GoalStep({
   setDietStyle,
   calorieTarget,
   setCalorieTarget,
+  enabledSlots,
+  servingsPerMeal,
   avoidIngredients,
   setAvoidIngredients,
   pantryIngredients,
   setPantryIngredients
 }) {
+  const dailyTarget = getDailyCalorieTarget(calorieTarget, enabledSlots.length);
+  const cookedTarget = getCookedDailyCalorieTarget(calorieTarget, enabledSlots.length, servingsPerMeal);
+
   return (
     <View style={styles.stack}>
       <View style={styles.choiceGrid}>
@@ -1939,12 +1973,12 @@ function GoalStep({
           <PillOption key={style} label={style} selected={dietStyle === style} onPress={() => setDietStyle(style)} />
         ))}
       </View>
-      <Field label="Daily calories">
+      <Field label="Cals per meal, 1 serving">
         <TextInput
           value={calorieTarget}
           onChangeText={setCalorieTarget}
           keyboardType="number-pad"
-          placeholder="1800"
+          placeholder="600"
           placeholderTextColor="#999999"
           style={styles.cleanInput}
           returnKeyType="done"
@@ -1953,6 +1987,11 @@ function GoalStep({
           {...TEXT_INPUT_DONE_PROPS}
         />
       </Field>
+      <Text style={styles.calorieTargetHint}>
+        {dailyTarget > 0
+          ? `${dailyTarget} cals/day per serving, ${cookedTarget} cals/day cooked for ${servingsPerMeal} serving${servingsPerMeal === 1 ? '' : 's'}.`
+          : 'Enter a target for each meal serving.'}
+      </Text>
       <Field label="Extra avoids">
         <TextInput
           value={avoidIngredients}
@@ -2095,7 +2134,10 @@ function ReviewStep({
       <SummaryLine label="Meals" value={enabledSlots.map((slot) => `${slot.type} ${slot.time}`).join(', ')} />
       <SummaryLine label="Servings" value={`${servingsPerMeal} per meal`} />
       <SummaryLine label="Allergies" value={allergies.length ? allergies.join(', ') : 'None selected'} />
-      <SummaryLine label="Goal" value={`${dietStyle}, ${calorieTarget || 'no'} daily cals`} />
+      <SummaryLine
+        label="Goal"
+        value={`${dietStyle}, ${formatCalorieTargetSummary(calorieTarget, enabledSlots.length, servingsPerMeal)}`}
+      />
       <SummaryLine label="Pantry/fridge" value={pantryIngredients.trim() || 'Nothing entered'} />
       <SummaryLine label="Budget" value={`$${Number(budgetTarget || 0).toFixed(2)}`} />
       <SummaryLine label="Location" value={shoppingLocation || 'National average'} />
@@ -2967,6 +3009,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     paddingHorizontal: 18,
     borderWidth: 0
+  },
+  calorieTargetHint: {
+    color: COLORS.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '800',
+    marginTop: -8
   },
   keyboardAccessory: {
     minHeight: 44,

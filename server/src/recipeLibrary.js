@@ -229,11 +229,8 @@ function buildMacros(mealType, index, protein, preferences = {}) {
 function buildMacroTarget(mealType, preferences = {}) {
   const defaults = TYPE_TARGETS[mealType] || TYPE_TARGETS.Lunch;
   const calorieTarget = Number(preferences.calorieTarget);
-  const mealTypes = getMealTypes(preferences, {});
-  const totalWeight = mealTypes.reduce((total, type) => total + getMealWeight(type), 0) || 1;
-  const typeWeight = getMealWeight(mealType);
-  const centeredCalories = Number.isFinite(calorieTarget) && calorieTarget >= 1000
-    ? Math.round((calorieTarget * typeWeight) / totalWeight)
+  const centeredCalories = Number.isFinite(calorieTarget) && calorieTarget >= 100
+    ? Math.round(calorieTarget)
     : Math.round((defaults.calories[0] + defaults.calories[1]) / 2);
   const calories = clampNumber(centeredCalories, defaults.calories[0], defaults.calories[1]);
 
@@ -251,14 +248,6 @@ function buildMacroTarget(mealType, preferences = {}) {
     minFat: defaults.fat[0],
     maxFat: defaults.fat[1]
   };
-}
-
-function getMealWeight(mealType) {
-  if (mealType === 'Breakfast') return 0.24;
-  if (mealType === 'Lunch') return 0.33;
-  if (mealType === 'Dinner') return 0.37;
-  if (mealType === 'Snack') return 0.12;
-  return 0.3;
 }
 
 function buildIngredients(mealType, protein, index, variation = FLAVOR_VARIATIONS[0], preferences = {}) {
