@@ -2,10 +2,19 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import pg from 'pg';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cacheDir = path.resolve(__dirname, '..', '.cache');
 const usersPath = path.join(cacheDir, 'users.json');
+const { Pool } = pg;
+const databaseUrl = String(process.env.DATABASE_URL || '').trim();
+const pool = databaseUrl
+  ? new Pool({
+      connectionString: databaseUrl,
+      ssl: databaseUrl.includes('localhost') ? false : { rejectUnauthorized: false }
+    })
+  : null;
 
 export async function createSignup({ name, email }) {
   const cleanName = String(name || '').trim();
@@ -23,11 +32,10 @@ export async function createSignup({ name, email }) {
     throw error;
   }
 
-  const users = await readUsers();
   const token = randomBytes(28).toString('hex');
   const now = new Date().toISOString();
-  const existing = users[cleanEmail];
-  const user = {
+  const existing = await findUserByEmail(cleanEmail);
+  const user = await upsertUser({
     id: existing?.id || randomBytes(10).toString('hex'),
     name: cleanName,
     email: cleanEmail,
@@ -36,10 +44,7 @@ export async function createSignup({ name, email }) {
     confirmedAt: existing?.confirmedAt || null,
     confirmationToken: token,
     confirmationSentAt: now
-  };
-
-  users[cleanEmail] = user;
-  await writeUsers(users);
+  });
 
   const delivery = await sendConfirmationEmail(user, token);
 
@@ -54,17 +59,18 @@ export async function confirmSignup(token) {
   const cleanToken = String(token || '').trim();
   if (!cleanToken) return null;
 
-  const users = await readUsers();
-  const user = Object.values(users).find((candidate) => candidate.confirmationToken === cleanToken);
+  const user = await findUserByConfirmationToken(cleanToken);
   if (!user) return null;
 
-  user.confirmedAt = new Date().toISOString();
-  user.confirmationToken = null;
-  user.updatedAt = user.confirmedAt;
-  users[user.email] = user;
-  await writeUsers(users);
+  const confirmedAt = new Date().toISOString();
+  const confirmedUser = await upsertUser({
+    ...user,
+    confirmedAt,
+    confirmationToken: null,
+    updatedAt: confirmedAt
+  });
 
-  return publicUser(user);
+  return publicUser(confirmedUser);
 }
 
 export async function deleteSignup(email) {
@@ -76,9 +82,7 @@ export async function deleteSignup(email) {
     throw error;
   }
 
-  const users = await readUsers();
-  delete users[cleanEmail];
-  await writeUsers(users);
+  await deleteUserByEmail(cleanEmail);
 
   return { ok: true };
 }
@@ -90,6 +94,109 @@ function publicUser(user) {
     email: user.email,
     confirmedAt: user.confirmedAt
   };
+}
+
+async function findUserByEmail(email) {
+  if (pool) {
+    const result = await pool.query(
+      `select id, name, email, created_at, updated_at, confirmed_at, confirmation_token, confirmation_sent_at
+       from public.app_users
+       where email = $1
+       limit 1`,
+      [email]
+    );
+    return result.rows[0] ? dbRowToUser(result.rows[0]) : null;
+  }
+
+  const users = await readUsers();
+  return users[email] || null;
+}
+
+async function findUserByConfirmationToken(token) {
+  if (pool) {
+    const result = await pool.query(
+      `select id, name, email, created_at, updated_at, confirmed_at, confirmation_token, confirmation_sent_at
+       from public.app_users
+       where confirmation_token = $1
+       limit 1`,
+      [token]
+    );
+    return result.rows[0] ? dbRowToUser(result.rows[0]) : null;
+  }
+
+  const users = await readUsers();
+  return Object.values(users).find((candidate) => candidate.confirmationToken === token) || null;
+}
+
+async function upsertUser(user) {
+  if (pool) {
+    const result = await pool.query(
+      `insert into public.app_users (
+          id,
+          name,
+          email,
+          created_at,
+          updated_at,
+          confirmed_at,
+          confirmation_token,
+          confirmation_sent_at
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8)
+        on conflict (email) do update set
+          name = excluded.name,
+          updated_at = excluded.updated_at,
+          confirmed_at = excluded.confirmed_at,
+          confirmation_token = excluded.confirmation_token,
+          confirmation_sent_at = excluded.confirmation_sent_at
+        returning id, name, email, created_at, updated_at, confirmed_at, confirmation_token, confirmation_sent_at`,
+      [
+        user.id,
+        user.name,
+        user.email,
+        user.createdAt,
+        user.updatedAt,
+        user.confirmedAt,
+        user.confirmationToken,
+        user.confirmationSentAt
+      ]
+    );
+    return dbRowToUser(result.rows[0]);
+  }
+
+  const users = await readUsers();
+  users[user.email] = user;
+  await writeUsers(users);
+  return user;
+}
+
+async function deleteUserByEmail(email) {
+  if (pool) {
+    await pool.query('delete from public.app_users where email = $1', [email]);
+    return;
+  }
+
+  const users = await readUsers();
+  delete users[email];
+  await writeUsers(users);
+}
+
+function dbRowToUser(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    createdAt: toIsoString(row.created_at),
+    updatedAt: toIsoString(row.updated_at),
+    confirmedAt: toIsoString(row.confirmed_at),
+    confirmationToken: row.confirmation_token,
+    confirmationSentAt: toIsoString(row.confirmation_sent_at)
+  };
+}
+
+function toIsoString(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  return new Date(value).toISOString();
 }
 
 async function readUsers() {
