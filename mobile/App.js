@@ -28,6 +28,7 @@ import {
   MapPin,
   Plus,
   RefreshCw,
+  ShoppingCart,
   Sparkles
 } from 'lucide-react-native';
 
@@ -91,6 +92,7 @@ const INITIAL_MEAL_SLOTS = [
 ];
 const USER_STORAGE_KEY = 'cutplate:user:v1';
 const CALENDAR_STORAGE_KEY = 'cutplate:calendar:v1';
+const SHOPPING_LIST_STORAGE_KEY = 'cutplate:shopping-list:v1';
 const KEYBOARD_ACCESSORY_ID = 'cutplate-keyboard-done';
 const KEYBOARD_DISMISS_MODE = Platform.OS === 'ios' ? 'interactive' : 'on-drag';
 const TEXT_INPUT_DONE_PROPS = Platform.OS === 'ios' ? { inputAccessoryViewID: KEYBOARD_ACCESSORY_ID } : {};
@@ -119,6 +121,7 @@ export default function App() {
   const [signupNotice, setSignupNotice] = useState('');
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [calendarMeals, setCalendarMeals] = useState([]);
+  const [latestShoppingPlan, setLatestShoppingPlan] = useState(null);
   const [appMode, setAppMode] = useState('home');
   const [step, setStep] = useState(0);
   const [days, setDays] = useState(5);
@@ -182,14 +185,16 @@ export default function App() {
     let cancelled = false;
 
     const boot = async () => {
-      const [storedViewer, storedCalendarMeals] = await Promise.all([
+      const [storedViewer, storedCalendarMeals, storedShoppingPlan] = await Promise.all([
         loadStoredJson(USER_STORAGE_KEY, null),
-        loadStoredJson(CALENDAR_STORAGE_KEY, [])
+        loadStoredJson(CALENDAR_STORAGE_KEY, []),
+        loadStoredJson(SHOPPING_LIST_STORAGE_KEY, null)
       ]);
 
       if (cancelled) return;
       setViewer(storedViewer);
       setCalendarMeals(Array.isArray(storedCalendarMeals) ? storedCalendarMeals : []);
+      setLatestShoppingPlan(storedShoppingPlan && typeof storedShoppingPlan === 'object' ? storedShoppingPlan : null);
       setSignupName(storedViewer?.name || '');
       setSignupEmail(storedViewer?.email || '');
       setHasBooted(true);
@@ -287,8 +292,13 @@ export default function App() {
 
   const handleAddPlanToCalendar = async (calendarPlan) => {
     const meals = buildCalendarMeals(calendarPlan);
+    const shoppingPlan = buildStoredShoppingPlan(calendarPlan);
     setCalendarMeals(meals);
-    await saveStoredJson(CALENDAR_STORAGE_KEY, meals);
+    setLatestShoppingPlan(shoppingPlan);
+    await Promise.all([
+      saveStoredJson(CALENDAR_STORAGE_KEY, meals),
+      saveStoredJson(SHOPPING_LIST_STORAGE_KEY, shoppingPlan)
+    ]);
     setPlan(null);
     setSelectedMenuPlan(null);
     setSelectedMealIds([]);
@@ -297,6 +307,11 @@ export default function App() {
     setWarnings([]);
     setError('');
     setAppMode('home');
+  };
+
+  const viewShoppingList = () => {
+    setError('');
+    setAppMode('shopping');
   };
 
   const updatePantryFinderIngredients = (value) => {
@@ -372,9 +387,10 @@ export default function App() {
       // Local deletion still lets the user remove app data from this device.
     }
 
-    await AsyncStorage.multiRemove([USER_STORAGE_KEY, CALENDAR_STORAGE_KEY]);
+    await AsyncStorage.multiRemove([USER_STORAGE_KEY, CALENDAR_STORAGE_KEY, SHOPPING_LIST_STORAGE_KEY]);
     setViewer(null);
     setCalendarMeals([]);
+    setLatestShoppingPlan(null);
     setPlan(null);
     setSelectedMenuPlan(null);
     setSelectedMealIds([]);
@@ -405,6 +421,10 @@ export default function App() {
       return;
     }
     if (appMode === 'pantry') {
+      setAppMode('home');
+      return;
+    }
+    if (appMode === 'shopping') {
       setAppMode('home');
       return;
     }
@@ -833,9 +853,16 @@ export default function App() {
           <HomeScreen
             viewer={viewer}
             calendarMeals={calendarMeals}
+            latestShoppingPlan={latestShoppingPlan}
+            onViewShoppingList={viewShoppingList}
             onStartGuided={startGuidedPlan}
             onStartPantry={startPantryFinder}
             onDeleteAccount={deleteAccount}
+          />
+        ) : appMode === 'shopping' ? (
+          <ShoppingListScreen
+            latestShoppingPlan={latestShoppingPlan}
+            onStartGuided={startGuidedPlan}
           />
         ) : appMode === 'pantry' ? (
           <PantryFinderScreen
@@ -1345,6 +1372,24 @@ function buildCalendarMeals(plan) {
   );
 }
 
+function buildStoredShoppingPlan(plan = {}) {
+  return {
+    savedAt: new Date().toISOString(),
+    id: plan.id || `shopping-${Date.now()}`,
+    summary: plan.summary || null,
+    preferences: plan.preferences || null,
+    groceryEstimate: plan.groceryEstimate || null,
+    shoppingList: Array.isArray(plan.shoppingList) ? plan.shoppingList : [],
+    safetyNote: plan.safetyNote || ''
+  };
+}
+
+function hasShoppingPlan(plan) {
+  const lineItems = plan?.groceryEstimate?.lineItems;
+  const shoppingList = plan?.shoppingList;
+  return (Array.isArray(lineItems) && lineItems.length > 0) || (Array.isArray(shoppingList) && shoppingList.length > 0);
+}
+
 function addPlanToCalendar(plan) {
   const dates = getScheduledDates(plan.days.length, Boolean(plan.preferences?.weekdaysOnly));
   const calendar = buildCalendarFile(plan, dates);
@@ -1559,7 +1604,15 @@ function OnboardingScreen({
   );
 }
 
-function HomeScreen({ viewer, calendarMeals, onStartGuided, onStartPantry, onDeleteAccount }) {
+function HomeScreen({
+  viewer,
+  calendarMeals,
+  latestShoppingPlan,
+  onViewShoppingList,
+  onStartGuided,
+  onStartPantry,
+  onDeleteAccount
+}) {
   const [deleteArmed, setDeleteArmed] = useState(false);
 
   return (
@@ -1599,7 +1652,11 @@ function HomeScreen({ viewer, calendarMeals, onStartGuided, onStartPantry, onDel
         </Pressable>
       </View>
 
-      <HomeCalendar meals={calendarMeals} />
+      <HomeCalendar
+        meals={calendarMeals}
+        latestShoppingPlan={latestShoppingPlan}
+        onViewShoppingList={onViewShoppingList}
+      />
 
       <Pressable
         onPress={() => (deleteArmed ? onDeleteAccount?.() : setDeleteArmed(true))}
@@ -1613,8 +1670,9 @@ function HomeScreen({ viewer, calendarMeals, onStartGuided, onStartPantry, onDel
   );
 }
 
-function HomeCalendar({ meals = [] }) {
+function HomeCalendar({ meals = [], latestShoppingPlan, onViewShoppingList }) {
   if (!meals.length) return null;
+  const hasShoppingList = hasShoppingPlan(latestShoppingPlan);
 
   const groups = meals.reduce((map, meal) => {
     const key = meal.date || meal.start || 'planned';
@@ -1628,7 +1686,19 @@ function HomeCalendar({ meals = [] }) {
     <View style={styles.homeCalendar}>
       <View style={styles.homeCalendarHeader}>
         <Text style={styles.cachedHomeTitle}>Meal calendar</Text>
-        <CalendarPlus color={COLORS.cardinal} size={20} strokeWidth={2.6} />
+        {hasShoppingList ? (
+          <Pressable
+            onPress={onViewShoppingList}
+            accessibilityRole="button"
+            accessibilityLabel="View shopping list"
+            style={styles.homeShoppingButton}
+          >
+            <ShoppingCart color={COLORS.cardinal} size={17} strokeWidth={2.8} />
+            <Text style={styles.homeShoppingButtonText}>List</Text>
+          </Pressable>
+        ) : (
+          <CalendarPlus color={COLORS.cardinal} size={20} strokeWidth={2.6} />
+        )}
       </View>
       {Array.from(groups.entries()).map(([dateKey, dayMeals]) => {
         const date = new Date(`${dateKey}T12:00:00`);
@@ -1654,6 +1724,41 @@ function HomeCalendar({ meals = [] }) {
         );
       })}
     </View>
+  );
+}
+
+function ShoppingListScreen({ latestShoppingPlan, onStartGuided }) {
+  const hasList = hasShoppingPlan(latestShoppingPlan);
+
+  return (
+    <ScrollView
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode={KEYBOARD_DISMISS_MODE}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.homeScroll}
+    >
+      <View style={styles.homeHero}>
+        <CardinalMascot compact active={false} />
+        <Text style={styles.homeTitle}>Shopping list</Text>
+        <Text style={styles.homeSubtitle}>
+          {hasList ? 'Latest saved grocery list from your meal calendar.' : 'Build a meal plan to save a grocery list here.'}
+        </Text>
+      </View>
+
+      {hasList ? (
+        <ShoppingListModule plan={latestShoppingPlan} />
+      ) : (
+        <Pressable onPress={onStartGuided} style={styles.homeActionPrimary}>
+          <View style={styles.homeActionIcon}>
+            <Sparkles color={COLORS.cardinal} size={24} />
+          </View>
+          <View style={styles.homeActionText}>
+            <Text style={styles.homeActionTitle}>Build a meal plan</Text>
+            <Text style={styles.homeActionSub}>Pick meals first, then the grocery list will save here.</Text>
+          </View>
+        </Pressable>
+      )}
+    </ScrollView>
   );
 }
 
@@ -2386,6 +2491,8 @@ function ResultScreen({
         <Text style={styles.calendarButtonText}>Add to calendar</Text>
       </Pressable>
 
+      <ShoppingListModule plan={plan} />
+
       {warnings.map((warning) => (
         <Text key={warning} style={styles.warningText}>
           {warning}
@@ -2431,51 +2538,60 @@ function ResultScreen({
         </View>
       ) : null}
 
-      <View style={styles.shoppingModule}>
-        <View style={styles.shoppingHeader}>
-          <View>
-            <Text style={styles.moduleTitle}>Shopping list</Text>
-            {groceryEstimate ? (
-              <Text style={styles.estimateRange}>
-                {groceryEstimate.location}: ${groceryEstimate.rangeLow} - ${groceryEstimate.rangeHigh}
-              </Text>
-            ) : null}
-          </View>
-          {groceryEstimate ? (
-            <Text style={styles.estimateTotal}>${groceryEstimate.estimatedTotal}</Text>
-          ) : null}
-        </View>
-        {groceryEstimate?.lineItems?.length ? (
-          <View style={styles.costList}>
-            {groceryEstimate.lineItems.map((item) => (
-              <View key={item.name} style={styles.costItem}>
-                <View style={styles.costItemText}>
-                  <Text style={styles.costName}>{item.name}</Text>
-                  <Text style={styles.costQuantity}>{item.quantityLabel}</Text>
-                </View>
-                <Text style={styles.costPrice}>${item.estimatedCost}</Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
-        {!groceryEstimate?.lineItems?.length ? (
-          <View style={styles.shoppingList}>
-            {plan.shoppingList.slice(0, 22).map((item) => (
-              <Text key={item} style={styles.shoppingItem}>
-                {item}
-              </Text>
-            ))}
-          </View>
-        ) : null}
-        {groceryEstimate?.note ? <Text style={styles.estimateNote}>{groceryEstimate.note}</Text> : null}
-      </View>
-
       <Text style={styles.safetyText}>{plan.safetyNote}</Text>
       <Pressable onPress={onRegenerate} disabled={isLoading} style={styles.regenerateButton}>
         {isLoading ? <ActivityIndicator color={COLORS.cardinal} /> : <RefreshCw color={COLORS.cardinal} size={18} />}
         <Text style={styles.regenerateText}>Regenerate</Text>
       </Pressable>
     </ScrollView>
+  );
+}
+
+function ShoppingListModule({ plan }) {
+  const groceryEstimate = plan?.groceryEstimate;
+  const shoppingList = Array.isArray(plan?.shoppingList) ? plan.shoppingList : [];
+  const lineItems = Array.isArray(groceryEstimate?.lineItems) ? groceryEstimate.lineItems : [];
+
+  if (!lineItems.length && !shoppingList.length) return null;
+
+  return (
+    <View style={styles.shoppingModule}>
+      <View style={styles.shoppingHeader}>
+        <View style={styles.shoppingHeaderText}>
+          <Text style={styles.moduleTitle}>Shopping list</Text>
+          {groceryEstimate ? (
+            <Text style={styles.estimateRange}>
+              {groceryEstimate.location}: ${groceryEstimate.rangeLow} - ${groceryEstimate.rangeHigh}
+            </Text>
+          ) : null}
+        </View>
+        {groceryEstimate ? (
+          <Text style={styles.estimateTotal}>${groceryEstimate.estimatedTotal}</Text>
+        ) : null}
+      </View>
+      {lineItems.length ? (
+        <View style={styles.costList}>
+          {lineItems.map((item, index) => (
+            <View key={`${item.name || 'item'}-${index}`} style={styles.costItem}>
+              <View style={styles.costItemText}>
+                <Text style={styles.costName}>{item.name}</Text>
+                <Text style={styles.costQuantity}>{item.quantityLabel}</Text>
+              </View>
+              <Text style={styles.costPrice}>${item.estimatedCost}</Text>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <View style={styles.shoppingList}>
+          {shoppingList.slice(0, 22).map((item, index) => (
+            <Text key={`${item}-${index}`} style={styles.shoppingItem}>
+              {item}
+            </Text>
+          ))}
+        </View>
+      )}
+      {groceryEstimate?.note ? <Text style={styles.estimateNote}>{groceryEstimate.note}</Text> : null}
+    </View>
   );
 }
 
@@ -2814,7 +2930,23 @@ const styles = StyleSheet.create({
   homeCalendarHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  homeShoppingButton: {
+    minHeight: 40,
+    borderRadius: 999,
+    backgroundColor: COLORS.white,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  homeShoppingButtonText: {
+    color: COLORS.cardinal,
+    fontSize: 13,
+    fontWeight: '900'
   },
   homeCalendarDay: {
     backgroundColor: COLORS.white,
@@ -3810,6 +3942,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     gap: 14
+  },
+  shoppingHeaderText: {
+    flex: 1
   },
   estimateRange: {
     color: COLORS.muted,
