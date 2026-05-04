@@ -2,7 +2,7 @@ import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
 import { buildMealPlan, normalizePreferences } from './recipeEngine.js';
-import { generateAiMealPlan, generateSourcedPantryRecipes } from './openaiPlanner.js';
+import { analyzePantryImage, generateAiMealPlan, generateSourcedPantryRecipes } from './openaiPlanner.js';
 import { CREATOR_SOURCES, SOURCE_POLICY_NOTES } from './sources.js';
 import {
   attachGroceryEstimate,
@@ -26,7 +26,7 @@ const corsOrigin = process.env.CORS_ORIGIN || '*';
 const pendingAiPlans = new Map();
 
 app.use(cors({ origin: corsOrigin === '*' ? true : corsOrigin }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '12mb' }));
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -90,6 +90,32 @@ app.post('/api/delete-account', async (req, res, next) => {
   try {
     await deleteSignup(req.body?.email);
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/analyze-pantry-photo', async (req, res, next) => {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({
+        error: 'Pantry photo analysis is not configured. Add OPENAI_API_KEY and try again.'
+      });
+    }
+
+    const imageBase64 = String(req.body?.imageBase64 || '').trim();
+    const mimeType = String(req.body?.mimeType || 'image/jpeg').trim();
+
+    if (!imageBase64) {
+      return res.status(400).json({ error: 'Add a pantry photo first.' });
+    }
+
+    if (imageBase64.length > 10_000_000) {
+      return res.status(413).json({ error: 'That photo is too large. Try a smaller image.' });
+    }
+
+    const analysis = await analyzePantryImage({ imageBase64, mimeType });
+    res.json(analysis);
   } catch (error) {
     next(error);
   }

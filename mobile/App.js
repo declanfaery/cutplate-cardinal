@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Image,
   InputAccessoryView,
   Keyboard,
   Linking,
@@ -16,15 +17,18 @@ import {
   TextInput,
   View
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Svg, { Circle, Path } from 'react-native-svg';
 import {
   Check,
   CalendarPlus,
+  Camera,
   ChevronLeft,
   Clock,
   DollarSign,
   ExternalLink,
+  ImagePlus,
   MapPin,
   Plus,
   RefreshCw,
@@ -149,7 +153,11 @@ export default function App() {
   const [menuPricing, setMenuPricing] = useState({ selectedTotal: 0, marginalCosts: {} });
   const [cachedRecipes, setCachedRecipes] = useState([]);
   const [pantryMealType, setPantryMealType] = useState('Dinner');
+  const [pantryProteinInput, setPantryProteinInput] = useState('');
+  const [pantryPhotoUri, setPantryPhotoUri] = useState('');
+  const [pantryDetectedIngredients, setPantryDetectedIngredients] = useState([]);
   const [pantryRecipes, setPantryRecipes] = useState([]);
+  const [isAnalyzingPantryPhoto, setIsAnalyzingPantryPhoto] = useState(false);
   const [isPantrySearching, setIsPantrySearching] = useState(false);
   const [pantrySearchError, setPantrySearchError] = useState('');
   const [pantrySearchNote, setPantrySearchNote] = useState('');
@@ -238,6 +246,8 @@ export default function App() {
     setPantryRecipes([]);
     setPantrySearchError('');
     setPantrySearchNote('');
+    setPantryPhotoUri('');
+    setPantryDetectedIngredients([]);
     setAppMode('pantry');
   };
 
@@ -328,8 +338,98 @@ export default function App() {
     setPantrySearchNote('');
   };
 
+  const updatePantryFinderProtein = (value) => {
+    setPantryProteinInput(value);
+    setPantryRecipes([]);
+    setPantrySearchError('');
+    setPantrySearchNote('');
+  };
+
+  const pickPantryPhoto = async () => {
+    setPantrySearchError('');
+    setPantrySearchNote('');
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setPantrySearchError('Photo library permission is needed to choose a pantry photo.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.55,
+      base64: true
+    });
+
+    await analyzePantryPhotoResult(result);
+  };
+
+  const takePantryPhoto = async () => {
+    setPantrySearchError('');
+    setPantrySearchNote('');
+
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      setPantrySearchError('Camera permission is needed to snap a pantry photo.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.55,
+      base64: true
+    });
+
+    await analyzePantryPhotoResult(result);
+  };
+
+  const analyzePantryPhotoResult = async (result) => {
+    if (result?.canceled) return;
+
+    const asset = result?.assets?.[0];
+    if (!asset?.base64) {
+      setPantrySearchError('Could not read that photo. Try another image.');
+      return;
+    }
+
+    setIsAnalyzingPantryPhoto(true);
+    setPantryPhotoUri(asset.uri || '');
+    setPantryDetectedIngredients([]);
+
+    try {
+      const response = await fetchWithRetry(`${API_URL}/api/analyze-pantry-photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: asset.base64,
+          mimeType: asset.mimeType || 'image/jpeg'
+        })
+      }, 1);
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const data = await response.json();
+      const detected = Array.isArray(data.ingredients) ? data.ingredients : [];
+      const ingredientNames = detected.map((ingredient) => ingredient.name).filter(Boolean);
+      const proteins = Array.isArray(data.proteins) ? data.proteins : [];
+
+      setPantryDetectedIngredients(detected);
+      setPantryIngredients((current) => mergeIngredientText(current, ingredientNames));
+      if (!pantryProteinInput.trim() && proteins.length) {
+        setPantryProteinInput(proteins.join(', '));
+      }
+      setPantrySearchNote(data.note || (ingredientNames.length ? 'I found ingredients from the photo. Edit anything I missed before finding meals.' : 'I could not spot many ingredients. Add what you know is there.'));
+    } catch (requestError) {
+      setPantrySearchError(formatApiFailure('Could not analyze the pantry photo', requestError));
+    } finally {
+      setIsAnalyzingPantryPhoto(false);
+    }
+  };
+
   const findPantryRecipes = async () => {
-    const ingredients = pantryIngredients.trim();
+    const ingredients = mergeIngredientText(pantryIngredients, splitRawIngredients(pantryProteinInput)).trim();
 
     setPantrySearchError('');
     setPantrySearchNote('');
@@ -347,6 +447,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ingredients,
+          pantryProtein: pantryProteinInput,
           mealType: pantryMealType,
           allergies,
           dietStyle,
@@ -868,10 +969,17 @@ export default function App() {
           <PantryFinderScreen
             pantryIngredients={pantryIngredients}
             setPantryIngredients={updatePantryFinderIngredients}
+            pantryProteinInput={pantryProteinInput}
+            setPantryProteinInput={updatePantryFinderProtein}
+            pantryPhotoUri={pantryPhotoUri}
+            pantryDetectedIngredients={pantryDetectedIngredients}
             pantryMealType={pantryMealType}
             setPantryMealType={updatePantryFinderMealType}
             pantryRecipes={pantryRecipes}
             onFindRecipes={findPantryRecipes}
+            onPickPhoto={pickPantryPhoto}
+            onTakePhoto={takePantryPhoto}
+            isAnalyzingPhoto={isAnalyzingPantryPhoto}
             isLoading={isPantrySearching}
             error={pantrySearchError}
             note={pantrySearchNote}
@@ -1275,6 +1383,30 @@ function splitIngredientList(value = '') {
     .split(',')
     .map((ingredient) => normalizeRecipeName(ingredient))
     .filter(Boolean);
+}
+
+function splitRawIngredients(value = '') {
+  return String(value || '')
+    .split(',')
+    .map((ingredient) => ingredient.trim())
+    .filter(Boolean);
+}
+
+function mergeIngredientText(current = '', additions = []) {
+  const merged = [];
+  const seen = new Set();
+
+  for (const ingredient of [...splitRawIngredients(current), ...additions]) {
+    const value = String(ingredient || '').trim();
+    if (!value) continue;
+
+    const key = normalizeRecipeName(value);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(value);
+  }
+
+  return merged.join(', ');
 }
 
 function getDailyCalorieTarget(calorieTarget, mealCount) {
@@ -1765,15 +1897,22 @@ function ShoppingListScreen({ latestShoppingPlan, onStartGuided }) {
 function PantryFinderScreen({
   pantryIngredients,
   setPantryIngredients,
+  pantryProteinInput,
+  setPantryProteinInput,
+  pantryPhotoUri,
+  pantryDetectedIngredients,
   pantryMealType,
   setPantryMealType,
   pantryRecipes,
   onFindRecipes,
+  onPickPhoto,
+  onTakePhoto,
+  isAnalyzingPhoto,
   isLoading,
   error,
   note
 }) {
-  const hasIngredients = pantryIngredients.trim().length > 0;
+  const hasIngredients = mergeIngredientText(pantryIngredients, splitRawIngredients(pantryProteinInput)).trim().length > 0;
 
   return (
     <ScrollView
@@ -1792,11 +1931,69 @@ function PantryFinderScreen({
         <Text style={styles.homeTitle}>What is in your pantry?</Text>
       </View>
 
+      <View style={styles.photoActionRow}>
+        <Pressable
+          onPress={onTakePhoto}
+          disabled={isAnalyzingPhoto || isLoading}
+          style={[styles.photoActionButton, (isAnalyzingPhoto || isLoading) && styles.continueDisabled]}
+        >
+          <Camera color={COLORS.cardinal} size={22} strokeWidth={2.8} />
+          <Text style={styles.photoActionText}>Snap pantry</Text>
+        </Pressable>
+        <Pressable
+          onPress={onPickPhoto}
+          disabled={isAnalyzingPhoto || isLoading}
+          style={[styles.photoActionButton, (isAnalyzingPhoto || isLoading) && styles.continueDisabled]}
+        >
+          <ImagePlus color={COLORS.cardinal} size={22} strokeWidth={2.8} />
+          <Text style={styles.photoActionText}>Choose photo</Text>
+        </Pressable>
+      </View>
+
+      {pantryPhotoUri ? (
+        <View style={styles.pantryPhotoPanel}>
+          <Image source={{ uri: pantryPhotoUri }} style={styles.pantryPhotoPreview} />
+          <View style={styles.pantryPhotoText}>
+            <Text style={styles.cachedHomeTitle}>{isAnalyzingPhoto ? 'Reading your pantry' : 'Photo scanned'}</Text>
+            <Text style={styles.cachedEmpty}>
+              {isAnalyzingPhoto ? 'I am identifying visible ingredients.' : 'Review the ingredients below before finding meals.'}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {pantryDetectedIngredients.length ? (
+        <View style={styles.detectedIngredientPanel}>
+          <Text style={styles.cachedHomeTitle}>Detected ingredients</Text>
+          <View style={styles.detectedIngredientList}>
+            {pantryDetectedIngredients.map((ingredient) => (
+              <Text key={`${ingredient.name}-${ingredient.category}`} style={styles.detectedIngredientPill}>
+                {ingredient.name}
+              </Text>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
       <Field label="Pantry or fridge ingredients">
         <TextInput
           value={pantryIngredients}
           onChangeText={setPantryIngredients}
           placeholder="Example: chicken, rice, broccoli, salsa"
+          placeholderTextColor="#999999"
+          style={styles.cleanInput}
+          returnKeyType="done"
+          blurOnSubmit
+          onSubmitEditing={dismissKeyboard}
+          {...TEXT_INPUT_DONE_PROPS}
+        />
+      </Field>
+
+      <Field label="Protein to include">
+        <TextInput
+          value={pantryProteinInput}
+          onChangeText={setPantryProteinInput}
+          placeholder="Example: chicken breast, steak, tofu, eggs"
           placeholderTextColor="#999999"
           style={styles.cleanInput}
           returnKeyType="done"
@@ -1819,11 +2016,13 @@ function PantryFinderScreen({
 
       <Pressable
         onPress={onFindRecipes}
-        disabled={!hasIngredients || isLoading}
-        style={[styles.homePlanButton, (!hasIngredients || isLoading) && styles.continueDisabled]}
+        disabled={!hasIngredients || isLoading || isAnalyzingPhoto}
+        style={[styles.homePlanButton, (!hasIngredients || isLoading || isAnalyzingPhoto) && styles.continueDisabled]}
       >
         {isLoading ? <ActivityIndicator color={COLORS.white} /> : null}
-        <Text style={styles.homePlanButtonText}>{isLoading ? 'Building meals' : 'Find meals from pantry'}</Text>
+        <Text style={styles.homePlanButtonText}>
+          {isLoading ? 'Building meals' : isAnalyzingPhoto ? 'Reading photo' : 'Find meals from pantry'}
+        </Text>
       </Pressable>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -3002,6 +3201,67 @@ const styles = StyleSheet.create({
   deleteAccountText: {
     color: COLORS.cardinal,
     fontSize: 14,
+    fontWeight: '800'
+  },
+  photoActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16
+  },
+  photoActionButton: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: 18,
+    backgroundColor: COLORS.pale,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 10
+  },
+  photoActionText: {
+    color: COLORS.cardinalDark,
+    fontSize: 15,
+    fontWeight: '900'
+  },
+  pantryPhotoPanel: {
+    borderRadius: 20,
+    backgroundColor: COLORS.pale2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    marginBottom: 16
+  },
+  pantryPhotoPreview: {
+    width: 78,
+    height: 78,
+    borderRadius: 16,
+    backgroundColor: COLORS.pale
+  },
+  pantryPhotoText: {
+    flex: 1,
+    gap: 4
+  },
+  detectedIngredientPanel: {
+    backgroundColor: COLORS.pale2,
+    borderRadius: 20,
+    padding: 16,
+    gap: 10,
+    marginBottom: 16
+  },
+  detectedIngredientList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8
+  },
+  detectedIngredientPill: {
+    color: COLORS.ink,
+    backgroundColor: COLORS.white,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    fontSize: 13,
     fontWeight: '800'
   },
   pantryTypeRow: {

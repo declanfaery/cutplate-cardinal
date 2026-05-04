@@ -104,6 +104,29 @@ const PANTRY_SCHEMA = {
   }
 };
 
+const PANTRY_IMAGE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['ingredients', 'proteins', 'note'],
+  properties: {
+    ingredients: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'category', 'confidence'],
+        properties: {
+          name: { type: 'string' },
+          category: { type: 'string' },
+          confidence: { type: 'string' }
+        }
+      }
+    },
+    proteins: { type: 'array', items: { type: 'string' } },
+    note: { type: 'string' }
+  }
+};
+
 export async function generateAiMealPlan(input = {}) {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is not configured.');
@@ -176,6 +199,77 @@ export async function generateAiMealPlan(input = {}) {
     generatedAt: new Date().toISOString(),
     generatedBy: process.env.OPENAI_MODEL || 'gpt-5-nano',
     preferences
+  };
+}
+
+export async function analyzePantryImage(input = {}) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not configured.');
+  }
+
+  const imageBase64 = String(input.imageBase64 || '').trim();
+  const mimeType = normalizeImageMimeType(input.mimeType);
+
+  if (!imageBase64) {
+    const error = new Error('Add a pantry photo first.');
+    error.status = 400;
+    throw error;
+  }
+
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const response = await client.responses.create({
+    model: process.env.OPENAI_VISION_MODEL || process.env.OPENAI_MODEL || 'gpt-5-nano',
+    input: [
+      {
+        role: 'developer',
+        content: [
+          {
+            type: 'input_text',
+            text:
+              'You identify visible pantry, fridge, freezer, and countertop food items from a user photo for a meal-planning app. Return only items that are reasonably visible or strongly implied by readable packaging. Do not invent hidden ingredients. Keep names grocery-friendly, concise, and singular where possible.'
+          }
+        ]
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text:
+              'Analyze this pantry/fridge photo. Return likely usable ingredients, identify any visible proteins separately, and include a short note if the photo is blurry, blocked, or missing obvious protein items. Confidence must be high, medium, or low.'
+          },
+          {
+            type: 'input_image',
+            image_url: `data:${mimeType};base64,${imageBase64}`
+          }
+        ]
+      }
+    ],
+    reasoning: { effort: process.env.OPENAI_REASONING_EFFORT || 'low' },
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'pantry_image',
+        strict: true,
+        schema: PANTRY_IMAGE_SCHEMA
+      }
+    }
+  });
+
+  const outputText = response.output_text;
+  if (!outputText) {
+    throw new Error('OpenAI returned empty pantry photo analysis.');
+  }
+
+  const payload = JSON.parse(outputText);
+  const ingredients = dedupeIngredientObjects(payload.ingredients || []);
+  const proteins = dedupeStrings(payload.proteins || []);
+
+  return {
+    ingredients,
+    proteins,
+    ingredientNames: ingredients.map((ingredient) => ingredient.name),
+    note: payload.note || ''
   };
 }
 
@@ -276,6 +370,57 @@ function defaultTime(mealType) {
   if (mealType === 'Lunch') return '12:30 PM';
   if (mealType === 'Snack') return '3:30 PM';
   return '6:30 PM';
+}
+
+function normalizeImageMimeType(value) {
+  const mimeType = String(value || '').trim().toLowerCase();
+  if (['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(mimeType)) {
+    return mimeType === 'image/jpg' ? 'image/jpeg' : mimeType;
+  }
+  return 'image/jpeg';
+}
+
+function dedupeIngredientObjects(items) {
+  const seen = new Set();
+  const cleaned = [];
+
+  for (const item of items) {
+    const name = String(item?.name || '').trim();
+    if (!name) continue;
+
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push({
+      name,
+      category: String(item?.category || 'pantry').trim() || 'pantry',
+      confidence: normalizeConfidence(item?.confidence)
+    });
+  }
+
+  return cleaned.slice(0, 30);
+}
+
+function dedupeStrings(items) {
+  const seen = new Set();
+  const cleaned = [];
+
+  for (const item of items) {
+    const value = String(item || '').trim();
+    if (!value) continue;
+
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push(value);
+  }
+
+  return cleaned.slice(0, 12);
+}
+
+function normalizeConfidence(value) {
+  const confidence = String(value || '').trim().toLowerCase();
+  return ['high', 'medium', 'low'].includes(confidence) ? confidence : 'medium';
 }
 
 function macroSchema() {

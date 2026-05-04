@@ -18,7 +18,9 @@
       "bundleIdentifier": "com.cutplate.cardinal",
       "buildNumber": "1",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "CutPlate Cardinal uses the camera so you can snap pantry or fridge photos for ingredient detection.",
+        "NSPhotoLibraryUsageDescription": "CutPlate Cardinal uses photo library access so you can choose pantry or fridge photos for ingredient detection."
       }
     },
     "android": {
