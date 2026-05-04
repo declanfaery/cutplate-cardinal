@@ -226,7 +226,7 @@ export async function analyzePantryImage(input = {}) {
           {
             type: 'input_text',
             text:
-              'You identify visible pantry, fridge, freezer, and countertop food items from a user photo for a meal-planning app. Return only items that are reasonably visible or strongly implied by readable packaging. Do not invent hidden ingredients. Keep names grocery-friendly, concise, and singular where possible.'
+              'You identify visible pantry, fridge, freezer, and countertop food items from a user photo for a meal-planning app. Return only items that are reasonably visible or strongly implied by readable packaging. Do not invent hidden ingredients. Keep names grocery-friendly, concise, and singular where possible. The proteins array is only for true primary proteins such as chicken, turkey, beef, pork, fish, seafood, eggs, tofu, tempeh, beans, lentils, Greek yogurt, or cottage cheese. Never classify protein pasta, boxed macaroni, cheese sauce, snack foods, or tomato sauce as proteins.'
           }
         ]
       },
@@ -236,7 +236,7 @@ export async function analyzePantryImage(input = {}) {
           {
             type: 'input_text',
             text:
-              'Analyze this pantry/fridge photo. Return likely usable ingredients, identify any visible proteins separately, and include a short note if the photo is blurry, blocked, or missing obvious protein items. Confidence must be high, medium, or low.'
+              'Analyze this pantry/fridge photo. Return likely usable ingredients, identify any visible primary proteins separately, and include a short note if the photo is blurry, blocked, or missing obvious protein items. Do not return labels that say no, maybe, unknown, or question-mark guesses as ingredients. Confidence must be high, medium, or low.'
           },
           {
             type: 'input_image',
@@ -263,7 +263,7 @@ export async function analyzePantryImage(input = {}) {
 
   const payload = JSON.parse(outputText);
   const ingredients = dedupeIngredientObjects(payload.ingredients || []);
-  const proteins = dedupeStrings(payload.proteins || []);
+  const proteins = filterProteinNames(dedupeStrings(payload.proteins || []));
 
   return {
     ingredients,
@@ -300,7 +300,7 @@ export async function generateSourcedPantryRecipes(input = {}) {
           {
             type: 'input_text',
             text:
-              'You find real recipe ideas from the public web and selected public social recipe sources, then return original summaries for a pantry-first cooking app. Do not copy recipe pages, captions, or creator text. Every returned recipe must be built primarily around the user pantry ingredients. Optional additions must be small pantry staples only: measured dried spices, herbs, oil, citrus/vinegar, hot sauce, broth/water, salt, or pepper. Do not add specialty dairy, cheese sauces, cream sauces, cottage cheese, fresh cheeses, meat, seafood, or vegetables unless they are visible/typed pantry ingredients. Do not mash two unrelated recipes into one dish. A source link must match the same dish family as the returned recipe, not just share one ingredient. Macro numbers must be per serving. The calorieTarget input means target calories for this one meal serving, not a daily target. Return only valid JSON matching the schema.'
+              'You find real recipe ideas from the public web and selected public social recipe sources, then return original summaries for a pantry-first cooking app. Do not ask the user for permission or say you can start a live web search; do the search now and return recipes. Do not copy recipe pages, captions, or creator text. Every returned recipe must be built primarily around the user pantry ingredients. Optional additions must be small pantry staples only: measured dried spices, herbs, oil, citrus/vinegar, hot sauce, broth/water, salt, or pepper. Do not add specialty dairy, cheese sauces, cream sauces, cottage cheese, fresh cheeses, milk, butter, flour, meat, seafood, or vegetables unless they are visible/typed pantry ingredients. Do not include optional major ingredients outside the pantry list. If the user typed a specific protein cut, such as chicken breast, use that cut and do not swap to ground chicken or another meat. If the pantry includes a boxed mac, cheese sauce, or packaged cheese item, use that exact item only; do not invent extra milk, butter, parmesan, cream, or fresh cheese. For Lunch or Dinner, ignore snack foods like pretzels, popcorn, chips, crackers, and cookies unless the user explicitly selected Snack. Do not mash two unrelated recipes into one dish. A source link must match the same dish family as the returned recipe, not just share one ingredient. Macro numbers must be per serving. The calorieTarget input means target calories for this one meal serving, not a daily target. Return only valid JSON matching the schema.'
           }
         ]
       },
@@ -312,11 +312,12 @@ export async function generateSourcedPantryRecipes(input = {}) {
             text: JSON.stringify(
               {
                 task:
-                  'Find and summarize real recipe options for the requested meal type using the provided pantry/fridge ingredients as the core. Use the web search tool. Return exactly recipeCount different recipes unless there are truly not enough coherent matches. Recipe names should be specific to the source-backed food concept, not generic flavor templates. Do not return recipes named in excludeRecipeNames. Include source links whose recipe concept directly matches each returned dish. For example, do not cite a mac and cheese recipe for a tomato penne recipe, and do not add four-cheese sauce to a tomato pasta unless cheese sauce is in the user pantry ingredients. Use source nutrition/macros when available; otherwise estimate per-serving macros from the returned ingredient amounts. List seasonings/sauces with tbsp/tsp measurements. Steps should be plain sentences without leading numbers.',
+                  'Find and summarize real recipe options for the requested meal type using the provided pantry/fridge ingredients as the core. Use the web search tool now. Return exactly recipeCount different recipes. If exact web matches are sparse, use source-backed dish families and create original pantry-first variants that still obey the ingredient limits. Do not ask whether to proceed. Recipe names should be specific to the source-backed food concept, not generic flavor templates. Do not return recipes named in excludeRecipeNames. Include source links whose recipe concept directly matches each returned dish. For example, do not cite a mac and cheese recipe for a tomato penne recipe, and do not add four-cheese sauce to a tomato pasta unless cheese sauce is in the user pantry ingredients. For dinner/lunch, avoid snack-crusted or novelty snack recipes from pretzels, popcorn, chips, or crackers. Use source nutrition/macros when available; otherwise estimate per-serving macros from the returned ingredient amounts. List seasonings/sauces with tbsp/tsp measurements. Steps should be plain sentences without leading numbers.',
                 recipeCount,
                 mealType,
                 pantryIngredients,
                 excludeRecipeNames,
+                searchVariant: input.searchVariant || 'initial pantry recipe search',
                 allergies: input.allergies || [],
                 dietStyle: input.dietStyle || 'High protein',
                 calorieTarget: input.calorieTarget || null,
@@ -421,7 +422,7 @@ function dedupeIngredientObjects(items) {
   const cleaned = [];
 
   for (const item of items) {
-    const name = String(item?.name || '').trim();
+    const name = cleanDetectedIngredientName(item?.name);
     if (!name) continue;
 
     const key = name.toLowerCase();
@@ -435,6 +436,26 @@ function dedupeIngredientObjects(items) {
   }
 
   return cleaned.slice(0, 30);
+}
+
+function cleanDetectedIngredientName(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const lower = raw.toLowerCase();
+  if (/\b(no|unknown|unclear|maybe)\b/.test(lower) || raw.includes('?')) return '';
+
+  return raw
+    .replace(/\s*\([^)]*(maybe|unclear|unknown|no)[^)]*\)\s*/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function filterProteinNames(items = []) {
+  const allowedProteinPattern = /\b(chicken|turkey|beef|steak|pork|fish|salmon|tuna|tilapia|cod|shrimp|seafood|egg|eggs|tofu|tempeh|beans?|lentils?|chickpeas?|greek yogurt|cottage cheese)\b/i;
+  const blockedProteinPattern = /\b(protein pasta|protein penne|penne|pasta|macaroni|shells|cheddar|cheese sauce|four cheese|tomato sauce|marinara|pretzel|popcorn|chips?|crackers?)\b/i;
+
+  return items.filter((item) => allowedProteinPattern.test(item) && !blockedProteinPattern.test(item));
 }
 
 function dedupeStrings(items) {

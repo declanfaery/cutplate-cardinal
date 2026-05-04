@@ -123,7 +123,10 @@ app.post('/api/analyze-pantry-photo', async (req, res, next) => {
 
 app.post('/api/pantry-recipes', async (req, res, next) => {
   try {
-    const pantryIngredients = String(req.body?.ingredients || req.body?.pantryIngredients || '').trim();
+    const pantryIngredients = mergePantryIngredientText(
+      req.body?.ingredients || req.body?.pantryIngredients || '',
+      req.body?.pantryProtein || ''
+    );
     if (!pantryIngredients) {
       return res.status(400).json({ error: 'Enter pantry or fridge ingredients first.' });
     }
@@ -165,25 +168,26 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
       });
     }
 
-    const cachedPantryRecipes = await getCachedPantryRecipes({
-      pantryIngredients,
-      mealType,
-      excludeRecipeNames,
-      limit: Math.max(recipeCount, getPantryCacheMinRecipes())
-    });
-    const minCachedRecipes = forceFresh ? Math.min(3, recipeCount) : getPantryCacheMinRecipes();
-    if (cachedPantryRecipes.length >= minCachedRecipes) {
-      return res.json({
-        recipes: cachedPantryRecipes.slice(0, recipeCount),
-        usedIngredients: splitPantryIngredients(pantryIngredients),
-        note: 'Found cached recipe matches for those pantry ingredients.',
-        cache: {
-          hit: true,
-          source: 'recipe-index',
-          count: cachedPantryRecipes.length,
-          key: buildPlanCacheKey(cachePreferences)
-        }
+    if (!forceFresh) {
+      const cachedPantryRecipes = await getCachedPantryRecipes({
+        pantryIngredients,
+        mealType,
+        excludeRecipeNames,
+        limit: Math.max(recipeCount, getPantryCacheMinRecipes())
       });
+      if (cachedPantryRecipes.length >= getPantryCacheMinRecipes()) {
+        return res.json({
+          recipes: cachedPantryRecipes.slice(0, recipeCount),
+          usedIngredients: splitPantryIngredients(pantryIngredients),
+          note: 'Found cached recipe matches for those pantry ingredients.',
+          cache: {
+            hit: true,
+            source: 'recipe-index',
+            count: cachedPantryRecipes.length,
+            key: buildPlanCacheKey(cachePreferences)
+          }
+        });
+      }
     }
 
     if (!process.env.OPENAI_API_KEY) {
@@ -200,11 +204,47 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
       recipeCount,
       excludeRecipeNames
     });
-    pantryResponse.recipes = filterPantryRecipes(pantryResponse.recipes, {
+
+    let pantryRecipes = filterPantryRecipes(pantryResponse.recipes, {
       pantryIngredients,
       mealType,
       excludeRecipeNames
-    }).slice(0, recipeCount);
+    });
+
+    if (pantryRecipes.length < Math.min(recipeCount, 6)) {
+      const morePantryResponse = await generateSourcedPantryRecipes({
+        ...req.body,
+        ingredients: pantryIngredients,
+        pantryIngredients,
+        mealType,
+        recipeCount: Math.max(3, recipeCount - pantryRecipes.length),
+        excludeRecipeNames: [
+          ...excludeRecipeNames,
+          ...pantryRecipes.map((recipe) => recipe.name).filter(Boolean)
+        ],
+        searchVariant: 'additional pantry recipe search with different source concepts'
+      });
+
+      pantryRecipes = filterPantryRecipes([...pantryRecipes, ...morePantryResponse.recipes], {
+        pantryIngredients,
+        mealType,
+        excludeRecipeNames
+      });
+    }
+
+    pantryResponse.recipes = pantryRecipes.slice(0, recipeCount);
+
+    if (!pantryResponse.recipes.length) {
+      return res.status(422).json({
+        error:
+          'I could not find coherent pantry recipes for those items. Add a clear protein or another core ingredient and try again.'
+      });
+    }
+
+    if (/would you like|do you want|ready to fetch|need a moment/i.test(String(pantryResponse.note || ''))) {
+      pantryResponse.note = 'Built pantry-first recipe options from your ingredients and small measured staples.';
+    }
+
     const cacheResponse = {
       mode: 'sourced',
       warnings: [],
@@ -562,12 +602,20 @@ function usesUnsupportedMajorPantryAddition(recipe = {}, pantryTerms = []) {
       allowed: ['four cheese', 'four-cheese', 'cheese sauce']
     },
     {
-      pattern: /\b(cottage cheese|cream cheese|ricotta|mozzarella|cheddar|monterey jack|alfredo)\b/i,
-      allowed: ['cheese', 'cheddar', 'mozzarella', 'parmesan', 'cottage cheese', 'cream cheese', 'alfredo', 'mac and cheese']
+      pattern: /\b(milk|butter|flour|cream|whipping cream|heavy cream|half and half|half-and-half)\b/i,
+      allowed: ['milk', 'butter', 'flour', 'cream', 'whipping cream', 'heavy cream', 'half and half', 'half-and-half']
+    },
+    {
+      pattern: /\b(cottage cheese|cream cheese|ricotta|mozzarella|cheddar|monterey jack|parmesan|romano|alfredo)\b/i,
+      allowed: ['cheddar', 'mozzarella', 'parmesan', 'romano', 'cottage cheese', 'cream cheese', 'alfredo', 'mac and cheese', 'shells and white cheddar']
     },
     {
       pattern: /\b(shrimp|salmon|steak|beef|chicken breast|ground turkey|turkey|tofu|eggs?)\b/i,
       allowed: ['shrimp', 'salmon', 'steak', 'beef', 'chicken', 'turkey', 'tofu', 'egg']
+    },
+    {
+      pattern: /\b(ground chicken|ground beef|sun[-\s]?dried tomatoes|salsa|pesto|spinach|zucchini|broccoli|mushrooms?)\b/i,
+      allowed: ['ground chicken', 'ground beef', 'sun dried tomatoes', 'sun-dried tomatoes', 'salsa', 'pesto', 'spinach', 'zucchini', 'broccoli', 'mushroom']
     }
   ];
 
@@ -689,6 +737,22 @@ function splitPantryIngredients(value = '') {
     .split(/[,;\n]/)
     .map((ingredient) => ingredient.trim())
     .filter(Boolean);
+}
+
+function mergePantryIngredientText(...values) {
+  const seen = new Set();
+  const merged = [];
+
+  for (const value of values) {
+    for (const ingredient of splitPantryIngredients(value)) {
+      const key = ingredient.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(ingredient);
+    }
+  }
+
+  return merged.join(', ');
 }
 
 function averageRecipeMacro(recipes = [], key) {
