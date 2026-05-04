@@ -309,6 +309,7 @@ function buildPlanFingerprint(preferences = {}) {
     avoidIngredients: normalizeText(preferences.avoidIngredients),
     pantryIngredients: normalizeText(preferences.pantryIngredients),
     recipeMode: normalizeText(preferences.recipeMode),
+    recipeVariant: normalizeText(preferences.recipeVariant),
     weekdaysOnly: Boolean(preferences.weekdaysOnly),
     sourceHandles: normalizeList(preferences.sourceHandles)
   };

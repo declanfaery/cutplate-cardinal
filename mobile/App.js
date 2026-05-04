@@ -473,7 +473,7 @@ export default function App() {
     }
   };
 
-  const findPantryRecipes = async () => {
+  const findPantryRecipes = async ({ append = false } = {}) => {
     const ingredients = mergeIngredientText(pantryIngredients, splitRawIngredients(pantryProteinInput)).trim();
 
     setPantrySearchError('');
@@ -500,7 +500,10 @@ export default function App() {
           calorieTargetBasis: 'per_meal_per_serving',
           dailyCalorieTarget: getDailyCalorieTarget(calorieTarget, 1),
           cookedDailyCalorieTarget: getCookedDailyCalorieTarget(calorieTarget, 1, 1),
-          sourceHandles
+          sourceHandles,
+          recipeCount: append ? 6 : 9,
+          forceFresh: append,
+          excludeRecipeNames: append ? pantryRecipes.map((recipe) => recipe.name).filter(Boolean) : []
         })
       }, 1);
 
@@ -510,15 +513,35 @@ export default function App() {
 
       const data = await response.json();
       const recipes = Array.isArray(data.recipes) ? data.recipes : [];
-      setPantryRecipes(recipes);
-      setPantryVisibleRecipeCount(3);
+      if (append) {
+        const nextRecipes = uniqueRecipeList([...pantryRecipes, ...recipes]);
+        setPantryRecipes(nextRecipes);
+        setPantryVisibleRecipeCount((current) => Math.min(current + 3, nextRecipes.length));
+        if (nextRecipes.length === pantryRecipes.length) {
+          setPantrySearchNote('No new matches yet. Try adding another ingredient or protein.');
+        } else {
+          setPantrySearchNote(data.note || 'Added more pantry recipe options.');
+        }
+      } else {
+        setPantryRecipes(recipes);
+        setPantryVisibleRecipeCount(3);
+        setPantrySearchNote(data.note || '');
+      }
       setPantryStep(2);
-      setPantrySearchNote(data.note || '');
     } catch (requestError) {
       setPantrySearchError(formatApiFailure('Could not build pantry meals', requestError));
     } finally {
       setIsPantrySearching(false);
     }
+  };
+
+  const showMorePantryRecipes = () => {
+    if (pantryVisibleRecipeCount < pantryRecipes.length) {
+      setPantryVisibleRecipeCount((current) => Math.min(current + 3, pantryRecipes.length));
+      return;
+    }
+
+    findPantryRecipes({ append: true });
   };
 
   const deleteAccount = async () => {
@@ -1041,7 +1064,7 @@ export default function App() {
             onPickPhoto={pickPantryPhoto}
             onTakePhoto={takePantryPhoto}
             onAddRecipeToCalendar={handleAddPantryRecipeToCalendar}
-            onShowMoreRecipes={() => setPantryVisibleRecipeCount((current) => Math.min(current + 3, pantryRecipes.length))}
+            onShowMoreRecipes={showMorePantryRecipes}
             isAnalyzingPhoto={isAnalyzingPantryPhoto}
             isLoading={isPantrySearching}
             error={pantrySearchError}
@@ -1474,6 +1497,20 @@ function mergeIngredientText(current = '', additions = []) {
   return merged.join(', ');
 }
 
+function uniqueRecipeList(recipes = []) {
+  const seen = new Set();
+  const unique = [];
+
+  for (const recipe of recipes) {
+    const key = normalizeRecipeName(`${recipe?.mealType || ''}-${recipe?.name || ''}`);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(recipe);
+  }
+
+  return unique;
+}
+
 function getDailyCalorieTarget(calorieTarget, mealCount) {
   const perMeal = Number(calorieTarget || 0);
   const meals = Math.max(1, Number(mealCount || 1));
@@ -1513,6 +1550,17 @@ function formatSourceLabel(value = '') {
     .replace(/^@+/, '')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .trim();
+}
+
+function formatMacroRating(value = '') {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (normalized.includes('SUPER')) return 'SUPER FIT';
+  if (normalized.includes('BALANCED')) return 'BALANCED';
+  return 'FIT';
+}
+
+function formatRecipeStep(value = '') {
+  return String(value || '').trim().replace(/^\s*\d+[\).]\s*/, '');
 }
 
 function formatMenuCostLabel(meal, selected, costInfo) {
@@ -2400,7 +2448,6 @@ function PantryRecipeResults({ hasIngredients, recipes = [], visibleCount = 3, i
   const [openRecipeId, setOpenRecipeId] = useState('');
   const calendarDates = useMemo(() => getScheduledDates(7, false), []);
   const visibleRecipes = recipes.slice(0, Math.max(3, visibleCount));
-  const canShowMore = visibleRecipes.length < recipes.length;
 
   if (!hasIngredients) {
     return (
@@ -2411,13 +2458,11 @@ function PantryRecipeResults({ hasIngredients, recipes = [], visibleCount = 3, i
     );
   }
 
-  if (isLoading) return null;
-
   if (!recipes.length) {
     return (
       <View style={styles.pantryEmptyPanel}>
         <Text style={styles.cachedHomeTitle}>No pantry meals yet</Text>
-        <Text style={styles.cachedEmpty}>Tap Find meals from pantry and I will build options from what you entered.</Text>
+        <Text style={styles.cachedEmpty}>{isLoading ? 'Finding pantry meals from what you entered.' : 'Tap Find recipes and I will build options from what you entered.'}</Text>
       </View>
     );
   }
@@ -2433,7 +2478,7 @@ function PantryRecipeResults({ hasIngredients, recipes = [], visibleCount = 3, i
               <Text style={styles.recipeType}>{recipe.mealType}</Text>
               <Text style={styles.pantryRecipeName}>{recipe.name}</Text>
             </View>
-            <Text style={styles.ratingPill}>{recipe.macroRating || 'FIT'}</Text>
+            <Text style={styles.ratingPill}>{formatMacroRating(recipe.macroRating)}</Text>
           </View>
           <Text style={styles.recipeDescription}>{recipe.description}</Text>
           <View style={styles.macroRow}>
@@ -2448,7 +2493,7 @@ function PantryRecipeResults({ hasIngredients, recipes = [], visibleCount = 3, i
           ))}
           <Text style={styles.moduleTitle}>Steps</Text>
           {(recipe.steps || []).map((step, index) => (
-            <Text key={step} style={styles.recipeText}>{index + 1}. {step}</Text>
+            <Text key={step} style={styles.recipeText}>{index + 1}. {formatRecipeStep(step)}</Text>
           ))}
           {recipe.sources?.length ? (
             <View style={styles.sourceRow}>
@@ -2486,12 +2531,10 @@ function PantryRecipeResults({ hasIngredients, recipes = [], visibleCount = 3, i
           ) : null}
         </View>
       ))}
-      {canShowMore ? (
-        <Pressable onPress={onShowMore} style={styles.findMoreRecipesButton}>
-          <RefreshCw color={COLORS.cardinal} size={18} strokeWidth={2.8} />
-          <Text style={styles.findMoreRecipesText}>Find more recipes</Text>
-        </Pressable>
-      ) : null}
+      <Pressable onPress={onShowMore} disabled={isLoading} style={[styles.findMoreRecipesButton, isLoading && styles.continueDisabled]}>
+        {isLoading ? <ActivityIndicator color={COLORS.cardinal} /> : <RefreshCw color={COLORS.cardinal} size={18} strokeWidth={2.8} />}
+        <Text style={styles.findMoreRecipesText}>{isLoading ? 'Finding more' : 'Find more recipes'}</Text>
+      </Pressable>
     </View>
   );
 }
@@ -3208,7 +3251,7 @@ function RecipeModule({ meal, onSwap, isSwapping }) {
           </Text>
           <Text style={styles.recipeName}>{meal.name}</Text>
         </View>
-        <Text style={styles.ratingPill}>{meal.macroRating}</Text>
+        <Text style={styles.ratingPill}>{formatMacroRating(meal.macroRating)}</Text>
       </View>
       <Text style={styles.recipeDescription}>{meal.description}</Text>
       <View style={styles.macroRow}>
@@ -3226,7 +3269,7 @@ function RecipeModule({ meal, onSwap, isSwapping }) {
       <Text style={styles.moduleTitle}>Steps</Text>
       {(meal.steps || []).map((step, index) => (
         <Text key={step} style={styles.recipeText}>
-          {index + 1}. {step}
+          {index + 1}. {formatRecipeStep(step)}
         </Text>
       ))}
       <View style={styles.sourceRow}>

@@ -282,6 +282,8 @@ export async function generateSourcedPantryRecipes(input = {}) {
   const mealType = String(input.mealType || 'Dinner').trim() || 'Dinner';
   const pantryIngredients = String(input.ingredients || input.pantryIngredients || '').trim();
   const sourceSeeds = getSourceSeeds(input.sourceHandles || []);
+  const recipeCount = normalizeRecipeCount(input.recipeCount, 9);
+  const excludeRecipeNames = dedupeStrings(input.excludeRecipeNames || []);
 
   if (!pantryIngredients) {
     const error = new Error('Enter pantry or fridge ingredients first.');
@@ -298,7 +300,7 @@ export async function generateSourcedPantryRecipes(input = {}) {
           {
             type: 'input_text',
             text:
-              'You find real recipe ideas from the public web and selected public social recipe sources, then return original summaries for a pantry-first cooking app. Do not copy recipe pages, captions, or creator text. Every returned recipe must be built primarily around the user pantry ingredients, with only small pantry-staple additions like measured spices, citrus, sauces, or salt/pepper. Macro numbers must be per serving. The calorieTarget input means target calories for this one meal serving, not a daily target. Return only valid JSON matching the schema.'
+              'You find real recipe ideas from the public web and selected public social recipe sources, then return original summaries for a pantry-first cooking app. Do not copy recipe pages, captions, or creator text. Every returned recipe must be built primarily around the user pantry ingredients. Optional additions must be small pantry staples only: measured dried spices, herbs, oil, citrus/vinegar, hot sauce, broth/water, salt, or pepper. Do not add specialty dairy, cheese sauces, cream sauces, cottage cheese, fresh cheeses, meat, seafood, or vegetables unless they are visible/typed pantry ingredients. Do not mash two unrelated recipes into one dish. A source link must match the same dish family as the returned recipe, not just share one ingredient. Macro numbers must be per serving. The calorieTarget input means target calories for this one meal serving, not a daily target. Return only valid JSON matching the schema.'
           }
         ]
       },
@@ -310,9 +312,11 @@ export async function generateSourcedPantryRecipes(input = {}) {
             text: JSON.stringify(
               {
                 task:
-                  'Find and summarize real recipe options for the requested meal type using the provided pantry/fridge ingredients as the core. Use the web search tool. The recipe names should be specific to the ingredient combination, not generic flavor templates. Include source links for each recipe. Use source nutrition/macros when available; otherwise estimate per-serving macros from the returned ingredient amounts. List seasonings/sauces with tbsp/tsp measurements.',
+                  'Find and summarize real recipe options for the requested meal type using the provided pantry/fridge ingredients as the core. Use the web search tool. Return exactly recipeCount different recipes unless there are truly not enough coherent matches. Recipe names should be specific to the source-backed food concept, not generic flavor templates. Do not return recipes named in excludeRecipeNames. Include source links whose recipe concept directly matches each returned dish. For example, do not cite a mac and cheese recipe for a tomato penne recipe, and do not add four-cheese sauce to a tomato pasta unless cheese sauce is in the user pantry ingredients. Use source nutrition/macros when available; otherwise estimate per-serving macros from the returned ingredient amounts. List seasonings/sauces with tbsp/tsp measurements. Steps should be plain sentences without leading numbers.',
+                recipeCount,
                 mealType,
                 pantryIngredients,
+                excludeRecipeNames,
                 allergies: input.allergies || [],
                 dietStyle: input.dietStyle || 'High protein',
                 calorieTarget: input.calorieTarget || null,
@@ -346,14 +350,46 @@ export async function generateSourcedPantryRecipes(input = {}) {
   const payload = JSON.parse(outputText);
   return {
     ...payload,
-    recipes: payload.recipes.map((recipe, index) => ({
-      ...recipe,
-      id: recipe.id || `pantry-sourced-${index + 1}`,
-      optionKey: recipe.optionKey || recipe.id || `pantry-sourced-${index + 1}`,
-      mealType: recipe.mealType || mealType,
-      time: recipe.time || defaultTime(mealType)
-    }))
+    recipes: payload.recipes.map((recipe, index) => normalizeGeneratedRecipe(recipe, index, mealType))
   };
+}
+
+function normalizeGeneratedRecipe(recipe = {}, index, mealType) {
+  const id = recipe.id || `pantry-sourced-${index + 1}`;
+  return {
+    ...recipe,
+    id,
+    optionKey: recipe.optionKey || id,
+    mealType: recipe.mealType || mealType,
+    time: recipe.time || defaultTime(mealType),
+    macroRating: normalizeMacroRating(recipe.macroRating),
+    ingredients: Array.isArray(recipe.ingredients)
+      ? recipe.ingredients.map((ingredient) => String(ingredient || '').trim()).filter(Boolean)
+      : [],
+    steps: Array.isArray(recipe.steps)
+      ? recipe.steps.map(stripLeadingStepNumber).filter(Boolean)
+      : [],
+    sources: Array.isArray(recipe.sources)
+      ? recipe.sources.filter((source) => source?.url && source?.label).slice(0, 3)
+      : []
+  };
+}
+
+function normalizeMacroRating(value = '') {
+  const rating = String(value || '').trim().toUpperCase();
+  if (rating.includes('SUPER')) return 'SUPER FIT';
+  if (rating.includes('BALANCED')) return 'BALANCED';
+  return 'FIT';
+}
+
+function stripLeadingStepNumber(value = '') {
+  return String(value || '').trim().replace(/^\s*\d+[\).]\s*/, '');
+}
+
+function normalizeRecipeCount(value, fallback = 9) {
+  const count = Number(value || fallback);
+  if (!Number.isFinite(count)) return fallback;
+  return Math.min(12, Math.max(3, Math.round(count)));
 }
 
 function shouldUseWebSearch() {

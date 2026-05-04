@@ -129,6 +129,9 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
     }
 
     const mealType = normalizePantryMealType(req.body?.mealType);
+    const excludeRecipeNames = normalizeExcludedRecipeNames(req.body?.excludeRecipeNames || req.body?.excludeRecipes || []);
+    const forceFresh = parseBoolean(req.body?.forceFresh) || excludeRecipeNames.length > 0;
+    const recipeCount = normalizeRecipeCount(req.body?.recipeCount, forceFresh ? 6 : 9);
     const preferences = {
       ...normalizePreferences({
         days: 3,
@@ -145,28 +148,40 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
       recipeMode: 'pantry-sourced',
       pantryIngredients
     };
-    const cached = await getCachedPlan(preferences);
+    const cachePreferences = excludeRecipeNames.length
+      ? { ...preferences, recipeVariant: buildRecipeVariant(excludeRecipeNames) }
+      : preferences;
+    const cached = forceFresh ? null : await getCachedPlan(preferences);
 
-    if (cached?.plan?.recipeLibrary?.length) {
+    const cachedPlanRecipes = cached?.plan?.recipeLibrary?.length
+      ? filterPantryRecipes(cached.plan.recipeLibrary, { pantryIngredients, mealType, excludeRecipeNames })
+      : [];
+    if (cachedPlanRecipes.length >= getPantryCacheMinRecipes()) {
       return res.json({
-        recipes: cached.plan.recipeLibrary,
+        recipes: cachedPlanRecipes.slice(0, recipeCount),
         usedIngredients: splitPantryIngredients(pantryIngredients),
         note: 'Found previously gathered source matches for those pantry ingredients.',
         cache: cached.cache
       });
     }
 
-    const cachedPantryRecipes = await getCachedPantryRecipes({ pantryIngredients, mealType });
-    if (cachedPantryRecipes.length >= getPantryCacheMinRecipes()) {
+    const cachedPantryRecipes = await getCachedPantryRecipes({
+      pantryIngredients,
+      mealType,
+      excludeRecipeNames,
+      limit: Math.max(recipeCount, getPantryCacheMinRecipes())
+    });
+    const minCachedRecipes = forceFresh ? Math.min(3, recipeCount) : getPantryCacheMinRecipes();
+    if (cachedPantryRecipes.length >= minCachedRecipes) {
       return res.json({
-        recipes: cachedPantryRecipes,
+        recipes: cachedPantryRecipes.slice(0, recipeCount),
         usedIngredients: splitPantryIngredients(pantryIngredients),
         note: 'Found cached recipe matches for those pantry ingredients.',
         cache: {
           hit: true,
           source: 'recipe-index',
           count: cachedPantryRecipes.length,
-          key: buildPlanCacheKey(preferences)
+          key: buildPlanCacheKey(cachePreferences)
         }
       });
     }
@@ -181,8 +196,15 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
       ...req.body,
       ingredients: pantryIngredients,
       pantryIngredients,
-      mealType
+      mealType,
+      recipeCount,
+      excludeRecipeNames
     });
+    pantryResponse.recipes = filterPantryRecipes(pantryResponse.recipes, {
+      pantryIngredients,
+      mealType,
+      excludeRecipeNames
+    }).slice(0, recipeCount);
     const cacheResponse = {
       mode: 'sourced',
       warnings: [],
@@ -191,7 +213,7 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
         title: `${mealType} pantry recipe matches`,
         generatedAt: new Date().toISOString(),
         generatedBy: process.env.OPENAI_MODEL || 'gpt-5-nano',
-        preferences,
+        preferences: cachePreferences,
         summary: {
           days: 0,
           mealsPerDay: 0,
@@ -210,13 +232,13 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
       }
     };
 
-    await setCachedPlan(preferences, cacheResponse);
+    await setCachedPlan(cachePreferences, cacheResponse);
 
     return res.json({
       ...pantryResponse,
       cache: {
         hit: false,
-        key: buildPlanCacheKey(preferences)
+        key: buildPlanCacheKey(cachePreferences)
       }
     });
   } catch (error) {
@@ -348,8 +370,9 @@ async function buildCachedRecipePlanResponse(preferences) {
   };
 }
 
-async function getCachedPantryRecipes({ pantryIngredients, mealType }) {
+async function getCachedPantryRecipes({ pantryIngredients, mealType, excludeRecipeNames = [], limit = 12 }) {
   const pantryTerms = splitPantryIngredients(pantryIngredients);
+  const excluded = new Set(normalizeExcludedRecipeNames(excludeRecipeNames));
   const cachedRecipes = await listCachedRecipes({
     ingredients: pantryTerms,
     limit: 80
@@ -357,7 +380,9 @@ async function getCachedPantryRecipes({ pantryIngredients, mealType }) {
 
   return uniqueRecipes(cachedRecipes)
     .filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType)
-    .slice(0, 12);
+    .filter((recipe) => !excluded.has(normalizeRecipeIdentity(recipe.name)))
+    .filter((recipe) => !usesUnsupportedMajorPantryAddition(recipe, pantryTerms))
+    .slice(0, limit);
 }
 
 async function getCachedMenuRecipes(preferences) {
@@ -510,7 +535,68 @@ function recipeMatchesSelectedProtein(recipe, proteins = []) {
 
 function getPantryCacheMinRecipes() {
   const configured = Number(process.env.PANTRY_CACHE_MIN_RECIPES);
-  return Number.isFinite(configured) && configured > 0 ? configured : 4;
+  return Number.isFinite(configured) && configured > 0 ? configured : 6;
+}
+
+function filterPantryRecipes(recipes = [], { pantryIngredients = '', mealType, excludeRecipeNames = [] } = {}) {
+  const pantryTerms = splitPantryIngredients(pantryIngredients);
+  const excluded = new Set(normalizeExcludedRecipeNames(excludeRecipeNames));
+
+  return uniqueRecipes(recipes)
+    .filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType)
+    .filter((recipe) => !excluded.has(normalizeRecipeIdentity(recipe.name)))
+    .filter((recipe) => !usesUnsupportedMajorPantryAddition(recipe, pantryTerms));
+}
+
+function usesUnsupportedMajorPantryAddition(recipe = {}, pantryTerms = []) {
+  const pantryText = pantryTerms.map((term) => term.toLowerCase()).join(' ');
+  const searchable = [
+    recipe.name,
+    recipe.description,
+    ...(recipe.ingredients || [])
+  ].join(' ').toLowerCase();
+
+  const blockedAdditions = [
+    {
+      pattern: /\b(four[-\s]?cheese|cheese sauce)\b/i,
+      allowed: ['four cheese', 'four-cheese', 'cheese sauce']
+    },
+    {
+      pattern: /\b(cottage cheese|cream cheese|ricotta|mozzarella|cheddar|monterey jack|alfredo)\b/i,
+      allowed: ['cheese', 'cheddar', 'mozzarella', 'parmesan', 'cottage cheese', 'cream cheese', 'alfredo', 'mac and cheese']
+    },
+    {
+      pattern: /\b(shrimp|salmon|steak|beef|chicken breast|ground turkey|turkey|tofu|eggs?)\b/i,
+      allowed: ['shrimp', 'salmon', 'steak', 'beef', 'chicken', 'turkey', 'tofu', 'egg']
+    }
+  ];
+
+  return blockedAdditions.some(({ pattern, allowed }) =>
+    pattern.test(searchable) && !allowed.some((term) => pantryText.includes(term))
+  );
+}
+
+function normalizeRecipeCount(value, fallback = 9) {
+  const count = Number(value || fallback);
+  if (!Number.isFinite(count)) return fallback;
+  return Math.min(12, Math.max(3, Math.round(count)));
+}
+
+function normalizeExcludedRecipeNames(values = []) {
+  const input = Array.isArray(values) ? values : [values];
+  return [...new Set(input.map(normalizeRecipeIdentity).filter(Boolean))];
+}
+
+function normalizeRecipeIdentity(value = '') {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function buildRecipeVariant(excludeRecipeNames = []) {
+  return `more:${normalizeExcludedRecipeNames(excludeRecipeNames).sort().join('|')}`;
+}
+
+function parseBoolean(value) {
+  return /^(1|true|yes)$/i.test(String(value || ''));
 }
 
 function getOrStartAiPlan(preferences) {
