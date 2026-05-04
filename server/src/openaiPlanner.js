@@ -192,7 +192,7 @@ export async function generateAiMealPlan(input = {}) {
     throw new Error('OpenAI returned an empty meal plan.');
   }
 
-  const plan = JSON.parse(outputText);
+  const plan = normalizeGeneratedPlan(JSON.parse(outputText));
   return {
     ...plan,
     id: `ai-${Date.now()}`,
@@ -355,7 +355,7 @@ export async function generateSourcedPantryRecipes(input = {}) {
   };
 }
 
-function normalizeGeneratedRecipe(recipe = {}, index, mealType) {
+export function normalizeGeneratedRecipe(recipe = {}, index, mealType) {
   const id = recipe.id || `pantry-sourced-${index + 1}`;
   return {
     ...recipe,
@@ -365,7 +365,7 @@ function normalizeGeneratedRecipe(recipe = {}, index, mealType) {
     time: recipe.time || defaultTime(mealType),
     macroRating: normalizeMacroRating(recipe.macroRating),
     ingredients: Array.isArray(recipe.ingredients)
-      ? recipe.ingredients.map((ingredient) => String(ingredient || '').trim()).filter(Boolean)
+      ? normalizeIngredientLines(recipe.ingredients)
       : [],
     steps: Array.isArray(recipe.steps)
       ? recipe.steps.map(stripLeadingStepNumber).filter(Boolean)
@@ -374,6 +374,92 @@ function normalizeGeneratedRecipe(recipe = {}, index, mealType) {
       ? recipe.sources.filter((source) => source?.url && source?.label).slice(0, 3)
       : []
   };
+}
+
+function normalizeGeneratedPlan(plan = {}) {
+  const recipeLibrary = Array.isArray(plan.recipeLibrary)
+    ? plan.recipeLibrary.map((recipe, index) => normalizeGeneratedRecipe(recipe, index, recipe.mealType))
+    : [];
+
+  const days = Array.isArray(plan.days)
+    ? plan.days.map((day) => ({
+        ...day,
+        meals: Array.isArray(day.meals)
+          ? day.meals.map((meal, index) => normalizeGeneratedRecipe(meal, index, meal.mealType))
+          : []
+      }))
+    : [];
+
+  return {
+    ...plan,
+    days,
+    recipeLibrary
+  };
+}
+
+function normalizeIngredientLines(ingredients = []) {
+  const normalized = [];
+  const seen = new Set();
+
+  for (const ingredient of ingredients) {
+    const line = String(ingredient || '').trim();
+    if (!line) continue;
+
+    for (const expanded of expandBareSeasoning(line)) {
+      const key = expanded.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      normalized.push(expanded);
+    }
+  }
+
+  return normalized;
+}
+
+function expandBareSeasoning(line = '') {
+  const normalized = line
+    .trim()
+    .toLowerCase()
+    .replace(/[.]/g, '')
+    .replace(/\s+/g, ' ');
+
+  if (!normalized) return [];
+  if (hasMeasurement(normalized)) return [line];
+
+  if (/^(salt and pepper|salt & pepper)( to taste)?$/.test(normalized)) {
+    return ['1/4 tsp kosher salt', '1/4 tsp black pepper'];
+  }
+
+  const seasoningMeasurements = [
+    [/^(salt|kosher salt|sea salt)( to taste)?$/, '1/4 tsp kosher salt'],
+    [/^(pepper|black pepper|cracked pepper)( to taste)?$/, '1/4 tsp black pepper'],
+    [/^(parsley|dried parsley|parsley flakes)( to taste)?$/, '1 tsp dried parsley'],
+    [/^(basil|dried basil)( to taste)?$/, '1 tsp dried basil'],
+    [/^(oregano|dried oregano)( to taste)?$/, '1 tsp dried oregano'],
+    [/^(thyme|dried thyme)( to taste)?$/, '1/2 tsp dried thyme'],
+    [/^(rosemary|dried rosemary)( to taste)?$/, '1/2 tsp dried rosemary'],
+    [/^(italian seasoning)( to taste)?$/, '1 tsp Italian seasoning'],
+    [/^(garlic powder)( to taste)?$/, '1/2 tsp garlic powder'],
+    [/^(onion powder)( to taste)?$/, '1/2 tsp onion powder'],
+    [/^(chili powder)( to taste)?$/, '1/2 tsp chili powder'],
+    [/^(paprika|smoked paprika)( to taste)?$/, `1 tsp ${normalized.replace(/ to taste$/, '')}`],
+    [/^(cumin|ground cumin)( to taste)?$/, '1/2 tsp ground cumin'],
+    [/^(coriander|ground coriander)( to taste)?$/, '1/2 tsp ground coriander'],
+    [/^(red pepper flakes|crushed red pepper)( to taste)?$/, '1/4 tsp red pepper flakes'],
+    [/^(cinnamon|ground cinnamon)( to taste)?$/, '1/4 tsp ground cinnamon'],
+    [/^(dill|dried dill)( to taste)?$/, '1 tsp dried dill']
+  ];
+
+  for (const [pattern, measured] of seasoningMeasurements) {
+    if (pattern.test(normalized)) return [measured];
+  }
+
+  return [line];
+}
+
+function hasMeasurement(value = '') {
+  return /(^|\s)(\d+|one|two|three|four|five|six|seven|eight|nine|ten|half|quarter|pinch|dash)\b/i.test(value)
+    || /\b(tsp|teaspoon|tbsp|tablespoon|cup|cups|oz|ounce|ounces|lb|pound|pounds|g|gram|grams|ml|liter|litre|clove|cloves|can|cans|jar|jars|package|packages|box|boxes|bag|bags)\b/i.test(value);
 }
 
 function normalizeMacroRating(value = '') {

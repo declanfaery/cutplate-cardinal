@@ -3,8 +3,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const CACHE_VERSION = 'cutplate-plan-cache-v7';
-const RECIPE_CACHE_VERSION = 'cutplate-recipe-cache-v1';
+const CACHE_VERSION = 'cutplate-plan-cache-v8';
+const RECIPE_CACHE_VERSION = 'cutplate-recipe-cache-v2';
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
