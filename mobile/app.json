@@ -14,7 +14,7 @@
       "backgroundColor": "#edf3ef"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.cutplate.cardinal",
       "buildNumber": "1",
       "infoPlist": {
