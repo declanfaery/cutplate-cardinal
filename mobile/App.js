@@ -162,6 +162,8 @@ export default function App() {
   const [pantrySearchError, setPantrySearchError] = useState('');
   const [pantrySearchNote, setPantrySearchNote] = useState('');
   const [pantryScanStatus, setPantryScanStatus] = useState('idle');
+  const [pantryStep, setPantryStep] = useState(0);
+  const [pantryVisibleRecipeCount, setPantryVisibleRecipeCount] = useState(3);
   const [activeCalendarMeal, setActiveCalendarMeal] = useState(null);
   const [error, setError] = useState('');
   const pricingRequestId = useRef(0);
@@ -251,6 +253,8 @@ export default function App() {
     setPantryPhotoUri('');
     setPantryDetectedIngredients([]);
     setPantryScanStatus('idle');
+    setPantryStep(0);
+    setPantryVisibleRecipeCount(3);
     setAppMode('pantry');
   };
 
@@ -324,7 +328,12 @@ export default function App() {
 
   const openCalendarMeal = (meal) => {
     setError('');
-    setActiveCalendarMeal(meal);
+    setActiveCalendarMeal(enrichCalendarMealRecipe(meal, {
+      pantryRecipes,
+      cachedRecipes,
+      plan,
+      selectedMenuPlan
+    }));
     setAppMode('calendar-recipe');
   };
 
@@ -348,6 +357,7 @@ export default function App() {
   const updatePantryFinderIngredients = (value) => {
     setPantryIngredients(value);
     setPantryRecipes([]);
+    setPantryVisibleRecipeCount(3);
     setPantrySearchError('');
     setPantrySearchNote('');
   };
@@ -355,6 +365,7 @@ export default function App() {
   const updatePantryFinderMealType = (mealType) => {
     setPantryMealType(mealType);
     setPantryRecipes([]);
+    setPantryVisibleRecipeCount(3);
     setPantrySearchError('');
     setPantrySearchNote('');
   };
@@ -362,6 +373,7 @@ export default function App() {
   const updatePantryFinderProtein = (value) => {
     setPantryProteinInput(value);
     setPantryRecipes([]);
+    setPantryVisibleRecipeCount(3);
     setPantrySearchError('');
     setPantrySearchNote('');
   };
@@ -444,9 +456,12 @@ export default function App() {
       }
       if (ingredientNames.length) {
         setPantryScanStatus('detected');
+        setPantryStep(1);
+        setPantrySearchError('');
         setPantrySearchNote(data.note || 'I found ingredients from the photo. Add anything else you have before finding meals.');
       } else {
         setPantryScanStatus('empty');
+        setPantryStep(0);
         setPantrySearchError('I could not detect pantry or fridge ingredients in that photo. Try a clearer cabinet/fridge photo, or type what you have below.');
         setPantrySearchNote(data.note || '');
       }
@@ -494,7 +509,10 @@ export default function App() {
       }
 
       const data = await response.json();
-      setPantryRecipes(Array.isArray(data.recipes) ? data.recipes : []);
+      const recipes = Array.isArray(data.recipes) ? data.recipes : [];
+      setPantryRecipes(recipes);
+      setPantryVisibleRecipeCount(3);
+      setPantryStep(2);
       setPantrySearchNote(data.note || '');
     } catch (requestError) {
       setPantrySearchError(formatApiFailure('Could not build pantry meals', requestError));
@@ -552,6 +570,10 @@ export default function App() {
       return;
     }
     if (appMode === 'pantry') {
+      if (pantryStep > 0) {
+        setPantryStep((current) => Math.max(0, current - 1));
+        return;
+      }
       setAppMode('home');
       return;
     }
@@ -944,7 +966,7 @@ export default function App() {
         <TopNav
           showBack={Boolean(plan) || appMode !== 'home'}
           onBack={goBack}
-          progress={plan ? 1 : appMode === 'wizard' ? (step + 1) / stepCount : 0.08}
+          progress={plan ? 1 : appMode === 'wizard' ? (step + 1) / stepCount : appMode === 'pantry' ? (pantryStep + 1) / 3 : 0.08}
         />
 
         {plan ? (
@@ -1013,10 +1035,13 @@ export default function App() {
             setPantryMealType={updatePantryFinderMealType}
             pantryRecipes={pantryRecipes}
             pantryScanStatus={pantryScanStatus}
+            pantryStep={pantryStep}
+            visibleRecipeCount={pantryVisibleRecipeCount}
             onFindRecipes={findPantryRecipes}
             onPickPhoto={pickPantryPhoto}
             onTakePhoto={takePantryPhoto}
             onAddRecipeToCalendar={handleAddPantryRecipeToCalendar}
+            onShowMoreRecipes={() => setPantryVisibleRecipeCount((current) => Math.min(current + 3, pantryRecipes.length))}
             isAnalyzingPhoto={isAnalyzingPantryPhoto}
             isLoading={isPantrySearching}
             error={pantrySearchError}
@@ -1611,6 +1636,58 @@ function getRecipeFromCalendarMeal(meal = {}) {
   });
 }
 
+function enrichCalendarMealRecipe(meal = {}, sources = {}) {
+  if (!meal?.name) return meal;
+
+  const storedRecipe = meal.recipe?.name ? sanitizeCalendarRecipe(meal.recipe) : null;
+  if (storedRecipe && hasRecipeDetails(storedRecipe)) {
+    return { ...meal, recipe: storedRecipe };
+  }
+
+  const candidates = [
+    ...(Array.isArray(sources.pantryRecipes) ? sources.pantryRecipes : []),
+    ...(Array.isArray(sources.cachedRecipes) ? sources.cachedRecipes : []),
+    ...collectPlanRecipes(sources.plan),
+    ...collectPlanRecipes(sources.selectedMenuPlan)
+  ];
+  const targetName = normalizeRecipeName(meal.name);
+  const targetTypeName = normalizeRecipeName(`${meal.mealType || ''}-${meal.name}`);
+  const match = candidates.find((candidate) => {
+    const candidateName = normalizeRecipeName(candidate?.name);
+    const candidateTypeName = normalizeRecipeName(`${candidate?.mealType || ''}-${candidate?.name || ''}`);
+    return candidateName === targetName || candidateTypeName === targetTypeName;
+  });
+
+  if (!match) {
+    return storedRecipe ? { ...meal, recipe: storedRecipe } : meal;
+  }
+
+  return {
+    ...meal,
+    calories: match.macros?.calories || meal.calories || 0,
+    protein: match.macros?.protein || meal.protein || 0,
+    recipe: sanitizeCalendarRecipe({
+      ...match,
+      mealType: meal.mealType || match.mealType,
+      time: meal.time || match.time
+    })
+  };
+}
+
+function collectPlanRecipes(plan = {}) {
+  return [
+    ...(Array.isArray(plan?.recipeLibrary) ? plan.recipeLibrary : []),
+    ...(Array.isArray(plan?.days)
+      ? plan.days.flatMap((day) => Array.isArray(day.meals) ? day.meals : [])
+      : [])
+  ];
+}
+
+function hasRecipeDetails(recipe = {}) {
+  return (Array.isArray(recipe.ingredients) && recipe.ingredients.length > 0)
+    || (Array.isArray(recipe.steps) && recipe.steps.length > 0);
+}
+
 function buildStoredShoppingPlan(plan = {}) {
   return {
     savedAt: new Date().toISOString(),
@@ -2160,10 +2237,13 @@ function PantryFinderScreen({
   setPantryMealType,
   pantryRecipes,
   pantryScanStatus,
+  pantryStep,
+  visibleRecipeCount,
   onFindRecipes,
   onPickPhoto,
   onTakePhoto,
   onAddRecipeToCalendar,
+  onShowMoreRecipes,
   isAnalyzingPhoto,
   isLoading,
   error,
@@ -2171,6 +2251,11 @@ function PantryFinderScreen({
 }) {
   const hasIngredients = mergeIngredientText(pantryIngredients, splitRawIngredients(pantryProteinInput)).trim().length > 0;
   const scanned = pantryPhotoUri || pantryScanStatus !== 'idle';
+  const stepTitle = pantryStep === 0
+    ? 'Scan your pantry.'
+    : pantryStep === 1
+      ? 'Anything missing?'
+      : 'Pick a recipe.';
 
   return (
     <ScrollView
@@ -2179,95 +2264,143 @@ function PantryFinderScreen({
       showsVerticalScrollIndicator={false}
       contentContainerStyle={styles.homeScroll}
     >
-      <PantryScanIntro
-        scanned={Boolean(scanned)}
-        pantryPhotoUri={pantryPhotoUri}
-        pantryScanStatus={pantryScanStatus}
-        isAnalyzingPhoto={isAnalyzingPhoto}
-        isLoading={isLoading}
-        onTakePhoto={onTakePhoto}
-        onPickPhoto={onPickPhoto}
-      />
+      <View style={styles.homeHero}>
+        <CardinalMascot compact active={isAnalyzingPhoto || isLoading} />
+        <Text style={styles.homeTitle}>{stepTitle}</Text>
+        <Text style={styles.homeSubtitle}>
+          {pantryStep === 0
+            ? 'Take a cabinet or fridge photo. If it is not food, I will ask you to try again.'
+            : pantryStep === 1
+              ? 'Review what I found, add proteins or anything the photo missed, then choose a meal type.'
+              : 'Start with three options. If they are not right, pull up more from the same search.'}
+        </Text>
+      </View>
 
-      {pantryDetectedIngredients.length ? <DetectedIngredients ingredients={pantryDetectedIngredients} /> : null}
-
-      {scanned ? (
-        <View style={styles.pantryConfirmPanel}>
-          <Text style={styles.confirmPanelTitle}>Anything else?</Text>
-          <Text style={styles.cachedEmpty}>Add proteins or ingredients the scan missed, then I will search around the whole list.</Text>
-
-          <Field label="Detected or typed ingredients">
-            <TextInput
-              value={pantryIngredients}
-              onChangeText={setPantryIngredients}
-              placeholder="Example: rice, broccoli, salsa"
-              placeholderTextColor="#999999"
-              style={styles.cleanInput}
-              returnKeyType="done"
-              blurOnSubmit
-              onSubmitEditing={dismissKeyboard}
-              {...TEXT_INPUT_DONE_PROPS}
-            />
-          </Field>
-
-          <Field label="Other proteins or ingredients">
-            <TextInput
-              value={pantryProteinInput}
-              onChangeText={setPantryProteinInput}
-              placeholder="Example: chicken breast, steak, tofu, eggs"
-              placeholderTextColor="#999999"
-              style={styles.cleanInput}
-              returnKeyType="done"
-              blurOnSubmit
-              onSubmitEditing={dismissKeyboard}
-              {...TEXT_INPUT_DONE_PROPS}
-            />
-          </Field>
-        </View>
+      {pantryStep === 0 ? (
+        <PantryScanIntro
+          scanned={Boolean(scanned)}
+          pantryPhotoUri={pantryPhotoUri}
+          pantryScanStatus={pantryScanStatus}
+          isAnalyzingPhoto={isAnalyzingPhoto}
+          isLoading={isLoading}
+          onTakePhoto={onTakePhoto}
+          onPickPhoto={onPickPhoto}
+        />
       ) : null}
 
-      {scanned ? (
-        <View style={styles.pantryTypeRow}>
-          {['Breakfast', 'Lunch', 'Dinner', 'Snack'].map((mealType) => (
-            <PillOption
-              key={mealType}
-              label={mealType}
-              selected={pantryMealType === mealType}
-              onPress={() => setPantryMealType(mealType)}
-            />
-          ))}
-        </View>
-      ) : null}
-
-      {scanned ? (
-        <Pressable
-          onPress={onFindRecipes}
-          disabled={!hasIngredients || isLoading || isAnalyzingPhoto}
-          style={[styles.homePlanButton, (!hasIngredients || isLoading || isAnalyzingPhoto) && styles.continueDisabled]}
-        >
-          {isLoading ? <ActivityIndicator color={COLORS.white} /> : null}
-          <Text style={styles.homePlanButtonText}>
-            {isLoading ? 'Finding recipes' : isAnalyzingPhoto ? 'Reading photo' : 'Find recipes'}
-          </Text>
-        </Pressable>
+      {pantryStep === 1 ? (
+        <PantryConfirmStep
+          pantryIngredients={pantryIngredients}
+          setPantryIngredients={setPantryIngredients}
+          pantryProteinInput={pantryProteinInput}
+          setPantryProteinInput={setPantryProteinInput}
+          pantryDetectedIngredients={pantryDetectedIngredients}
+          pantryMealType={pantryMealType}
+          setPantryMealType={setPantryMealType}
+          hasIngredients={hasIngredients}
+          isAnalyzingPhoto={isAnalyzingPhoto}
+          isLoading={isLoading}
+          onFindRecipes={onFindRecipes}
+        />
       ) : null}
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      {note && pantryRecipes.length ? <Text style={styles.pantryNote}>{note}</Text> : null}
+      {note && pantryStep !== 0 ? <Text style={styles.pantryNote}>{note}</Text> : null}
 
-      <PantryRecipeResults
-        hasIngredients={hasIngredients}
-        recipes={pantryRecipes}
-        isLoading={isLoading}
-        onAddToCalendar={onAddRecipeToCalendar}
-      />
+      {pantryStep === 2 ? (
+        <PantryRecipeResults
+          hasIngredients={hasIngredients}
+          recipes={pantryRecipes}
+          visibleCount={visibleRecipeCount}
+          isLoading={isLoading}
+          onShowMore={onShowMoreRecipes}
+          onAddToCalendar={onAddRecipeToCalendar}
+        />
+      ) : null}
     </ScrollView>
   );
 }
 
-function PantryRecipeResults({ hasIngredients, recipes = [], isLoading, onAddToCalendar }) {
+function PantryConfirmStep({
+  pantryIngredients,
+  setPantryIngredients,
+  pantryProteinInput,
+  setPantryProteinInput,
+  pantryDetectedIngredients,
+  pantryMealType,
+  setPantryMealType,
+  hasIngredients,
+  isAnalyzingPhoto,
+  isLoading,
+  onFindRecipes
+}) {
+  return (
+    <>
+      {pantryDetectedIngredients.length ? <DetectedIngredients ingredients={pantryDetectedIngredients} /> : null}
+
+      <View style={styles.pantryConfirmPanel}>
+        <Text style={styles.confirmPanelTitle}>Add anything the scan missed.</Text>
+        <Text style={styles.cachedEmpty}>Proteins matter here: chicken, steak, tofu, eggs, fish, or whatever else you want included.</Text>
+
+        <Field label="Detected or typed ingredients">
+          <TextInput
+            value={pantryIngredients}
+            onChangeText={setPantryIngredients}
+            placeholder="Example: rice, broccoli, salsa"
+            placeholderTextColor="#999999"
+            style={styles.cleanInput}
+            returnKeyType="done"
+            blurOnSubmit
+            onSubmitEditing={dismissKeyboard}
+            {...TEXT_INPUT_DONE_PROPS}
+          />
+        </Field>
+
+        <Field label="Other proteins or ingredients">
+          <TextInput
+            value={pantryProteinInput}
+            onChangeText={setPantryProteinInput}
+            placeholder="Example: chicken breast, steak, tofu, eggs"
+            placeholderTextColor="#999999"
+            style={styles.cleanInput}
+            returnKeyType="done"
+            blurOnSubmit
+            onSubmitEditing={dismissKeyboard}
+            {...TEXT_INPUT_DONE_PROPS}
+          />
+        </Field>
+      </View>
+
+      <View style={styles.pantryTypeRow}>
+        {['Breakfast', 'Lunch', 'Dinner', 'Snack'].map((mealType) => (
+          <PillOption
+            key={mealType}
+            label={mealType}
+            selected={pantryMealType === mealType}
+            onPress={() => setPantryMealType(mealType)}
+          />
+        ))}
+      </View>
+
+      <Pressable
+        onPress={onFindRecipes}
+        disabled={!hasIngredients || isLoading || isAnalyzingPhoto}
+        style={[styles.homePlanButton, (!hasIngredients || isLoading || isAnalyzingPhoto) && styles.continueDisabled]}
+      >
+        {isLoading ? <ActivityIndicator color={COLORS.white} /> : null}
+        <Text style={styles.homePlanButtonText}>
+          {isLoading ? 'Finding recipes' : isAnalyzingPhoto ? 'Reading photo' : 'Find recipes'}
+        </Text>
+      </Pressable>
+    </>
+  );
+}
+
+function PantryRecipeResults({ hasIngredients, recipes = [], visibleCount = 3, isLoading, onShowMore, onAddToCalendar }) {
   const [openRecipeId, setOpenRecipeId] = useState('');
   const calendarDates = useMemo(() => getScheduledDates(7, false), []);
+  const visibleRecipes = recipes.slice(0, Math.max(3, visibleCount));
+  const canShowMore = visibleRecipes.length < recipes.length;
 
   if (!hasIngredients) {
     return (
@@ -2292,7 +2425,8 @@ function PantryRecipeResults({ hasIngredients, recipes = [], isLoading, onAddToC
   return (
     <View style={styles.pantryResults}>
       <Text style={styles.cachedHomeTitle}>Pantry meals</Text>
-      {recipes.map((recipe) => (
+      <Text style={styles.cachedEmpty}>{visibleRecipes.length} of {recipes.length} options showing.</Text>
+      {visibleRecipes.map((recipe) => (
         <View key={recipe.id || recipe.name} style={styles.pantryRecipeCard}>
           <View style={styles.recipeTop}>
             <View style={styles.recipeTitleBlock}>
@@ -2352,6 +2486,12 @@ function PantryRecipeResults({ hasIngredients, recipes = [], isLoading, onAddToC
           ) : null}
         </View>
       ))}
+      {canShowMore ? (
+        <Pressable onPress={onShowMore} style={styles.findMoreRecipesButton}>
+          <RefreshCw color={COLORS.cardinal} size={18} strokeWidth={2.8} />
+          <Text style={styles.findMoreRecipesText}>Find more recipes</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -3741,6 +3881,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '900',
     marginTop: 1
+  },
+  findMoreRecipesButton: {
+    minHeight: 50,
+    borderRadius: 16,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8
+  },
+  findMoreRecipesText: {
+    color: COLORS.cardinal,
+    fontSize: 16,
+    fontWeight: '900'
   },
   stepHeader: {
     marginBottom: 26
