@@ -13,6 +13,7 @@
     "test": "npm run test --prefix server",
     "check": "npm run test --prefix server && node --check mobile/App.js",
     "eas:ios:stage": "cd mobile && npx eas-cli build -p ios --profile preview",
+    "eas:ios:stage-testflight": "cd mobile && npx eas-cli build -p ios --profile stage-testflight --auto-submit-with-profile stage-testflight --what-to-test \"Stage 1.5.0: pantry photo scanning and cached recipe reuse.\"",
     "eas:ios:prod": "cd mobile && npx eas-cli build -p ios --profile production",
     "eas:ios:submit": "cd mobile && npx eas-cli submit -p ios --profile production"
   },

@@ -13,12 +13,23 @@
       "distribution": "internal",
       "channel": "stage"
     },
+    "stage-testflight": {
+      "autoIncrement": true,
+      "distribution": "store",
+      "channel": "stage",
+      "environment": "preview"
+    },
     "production": {
       "autoIncrement": true,
       "channel": "production"
     }
   },
   "submit": {
+    "stage-testflight": {
+      "ios": {
+        "ascAppId": "6765567210"
+      }
+    },
     "production": {
       "ios": {
         "ascAppId": "6765567210"
