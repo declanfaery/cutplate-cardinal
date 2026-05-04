@@ -111,7 +111,7 @@ const ONBOARDING_SLIDES = [
   },
   {
     title: 'Use what is already home.',
-    body: 'Enter pantry or fridge ingredients and CutPlate can build meal ideas around those items plus small seasonings.'
+    body: 'Snap a pantry or fridge photo, confirm what it finds, and CutPlate can build meal ideas around those items.'
   }
 ];
 
@@ -161,6 +161,8 @@ export default function App() {
   const [isPantrySearching, setIsPantrySearching] = useState(false);
   const [pantrySearchError, setPantrySearchError] = useState('');
   const [pantrySearchNote, setPantrySearchNote] = useState('');
+  const [pantryScanStatus, setPantryScanStatus] = useState('idle');
+  const [activeCalendarMeal, setActiveCalendarMeal] = useState(null);
   const [error, setError] = useState('');
   const pricingRequestId = useRef(0);
 
@@ -248,6 +250,7 @@ export default function App() {
     setPantrySearchNote('');
     setPantryPhotoUri('');
     setPantryDetectedIngredients([]);
+    setPantryScanStatus('idle');
     setAppMode('pantry');
   };
 
@@ -316,6 +319,24 @@ export default function App() {
     setSelectedDay(0);
     setWarnings([]);
     setError('');
+    setAppMode('home');
+  };
+
+  const openCalendarMeal = (meal) => {
+    setError('');
+    setActiveCalendarMeal(meal);
+    setAppMode('calendar-recipe');
+  };
+
+  const handleAddPantryRecipeToCalendar = async (recipe, date) => {
+    const meal = buildCalendarMealFromRecipe(recipe, date);
+    const nextMeals = [...calendarMeals.filter((item) => item.id !== meal.id), meal]
+      .sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')));
+
+    setCalendarMeals(nextMeals);
+    await saveStoredJson(CALENDAR_STORAGE_KEY, nextMeals);
+    setPantrySearchNote(`${recipe.name} added to ${formatLongDate(date)}.`);
+    setPantrySearchError('');
     setAppMode('home');
   };
 
@@ -393,6 +414,7 @@ export default function App() {
     }
 
     setIsAnalyzingPantryPhoto(true);
+    setPantryScanStatus('scanning');
     setPantryPhotoUri(asset.uri || '');
     setPantryDetectedIngredients([]);
 
@@ -420,8 +442,16 @@ export default function App() {
       if (!pantryProteinInput.trim() && proteins.length) {
         setPantryProteinInput(proteins.join(', '));
       }
-      setPantrySearchNote(data.note || (ingredientNames.length ? 'I found ingredients from the photo. Edit anything I missed before finding meals.' : 'I could not spot many ingredients. Add what you know is there.'));
+      if (ingredientNames.length) {
+        setPantryScanStatus('detected');
+        setPantrySearchNote(data.note || 'I found ingredients from the photo. Add anything else you have before finding meals.');
+      } else {
+        setPantryScanStatus('empty');
+        setPantrySearchError('I could not detect pantry or fridge ingredients in that photo. Try a clearer cabinet/fridge photo, or type what you have below.');
+        setPantrySearchNote(data.note || '');
+      }
     } catch (requestError) {
+      setPantryScanStatus('error');
       setPantrySearchError(formatApiFailure('Could not analyze the pantry photo', requestError));
     } finally {
       setIsAnalyzingPantryPhoto(false);
@@ -522,6 +552,11 @@ export default function App() {
       return;
     }
     if (appMode === 'pantry') {
+      setAppMode('home');
+      return;
+    }
+    if (appMode === 'calendar-recipe') {
+      setActiveCalendarMeal(null);
       setAppMode('home');
       return;
     }
@@ -956,6 +991,7 @@ export default function App() {
             calendarMeals={calendarMeals}
             latestShoppingPlan={latestShoppingPlan}
             onViewShoppingList={viewShoppingList}
+            onViewCalendarMeal={openCalendarMeal}
             onStartGuided={startGuidedPlan}
             onStartPantry={startPantryFinder}
             onDeleteAccount={deleteAccount}
@@ -976,14 +1012,18 @@ export default function App() {
             pantryMealType={pantryMealType}
             setPantryMealType={updatePantryFinderMealType}
             pantryRecipes={pantryRecipes}
+            pantryScanStatus={pantryScanStatus}
             onFindRecipes={findPantryRecipes}
             onPickPhoto={pickPantryPhoto}
             onTakePhoto={takePantryPhoto}
+            onAddRecipeToCalendar={handleAddPantryRecipeToCalendar}
             isAnalyzingPhoto={isAnalyzingPantryPhoto}
             isLoading={isPantrySearching}
             error={pantrySearchError}
             note={pantrySearchNote}
           />
+        ) : appMode === 'calendar-recipe' ? (
+          <CalendarRecipeScreen meal={activeCalendarMeal} />
         ) : (
           <ScrollView
             keyboardShouldPersistTaps="handled"
@@ -1498,10 +1538,77 @@ function buildCalendarMeals(plan) {
         time: meal.time,
         name: meal.name,
         calories: meal.macros?.calories || 0,
-        protein: meal.macros?.protein || 0
+        protein: meal.macros?.protein || 0,
+        recipe: sanitizeCalendarRecipe(meal)
       };
     })
   );
+}
+
+function buildCalendarMealFromRecipe(recipe, date) {
+  const mealType = recipe.mealType || 'Dinner';
+  const time = recipe.time || defaultMealTime(mealType);
+  const start = withMealTime(date, time);
+  const idBase = `${recipe.id || normalizeRecipeName(recipe.name)}-${start.toISOString().slice(0, 10)}`;
+
+  return {
+    id: `pantry-${idBase}`.replace(/[^a-z0-9-]/gi, '-'),
+    date: date.toISOString(),
+    start: start.toISOString(),
+    dayNumber: null,
+    dayLabel: formatLongDate(date),
+    mealType,
+    time,
+    name: recipe.name,
+    calories: recipe.macros?.calories || 0,
+    protein: recipe.macros?.protein || 0,
+    recipe: sanitizeCalendarRecipe({
+      ...recipe,
+      mealType,
+      time
+    })
+  };
+}
+
+function sanitizeCalendarRecipe(recipe = {}) {
+  return {
+    id: recipe.id || normalizeRecipeName(recipe.name),
+    mealType: recipe.mealType || 'Dinner',
+    time: recipe.time || defaultMealTime(recipe.mealType),
+    name: recipe.name || 'Saved recipe',
+    protein: recipe.protein || '',
+    description: recipe.description || '',
+    macroRating: recipe.macroRating || 'FIT',
+    prepTime: recipe.prepTime || '',
+    macros: {
+      calories: Number(recipe.macros?.calories || recipe.calories || 0),
+      protein: Number(recipe.macros?.protein || recipe.proteinGrams || 0),
+      carbs: Number(recipe.macros?.carbs || 0),
+      fat: Number(recipe.macros?.fat || 0)
+    },
+    ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients : [],
+    steps: Array.isArray(recipe.steps) ? recipe.steps : [],
+    sources: Array.isArray(recipe.sources) ? recipe.sources : []
+  };
+}
+
+function getRecipeFromCalendarMeal(meal = {}) {
+  if (meal?.recipe?.name) return sanitizeCalendarRecipe(meal.recipe);
+  if (!meal?.name) return null;
+
+  return sanitizeCalendarRecipe({
+    id: meal.id,
+    mealType: meal.mealType,
+    time: meal.time,
+    name: meal.name,
+    macros: {
+      calories: meal.calories || 0,
+      protein: meal.protein || 0,
+      carbs: 0,
+      fat: 0
+    },
+    description: 'Recipe details were not stored for this calendar item yet.'
+  });
 }
 
 function buildStoredShoppingPlan(plan = {}) {
@@ -1591,6 +1698,13 @@ function withMealTime(date, time = '') {
   return next;
 }
 
+function defaultMealTime(mealType = '') {
+  if (mealType === 'Breakfast') return '8:00 AM';
+  if (mealType === 'Lunch') return '12:30 PM';
+  if (mealType === 'Snack') return '3:30 PM';
+  return '6:30 PM';
+}
+
 function formatCalendarDateTime(date) {
   return date.toISOString().replace(/[-:]/g, '').replace(/\\.\\d{3}Z$/, 'Z');
 }
@@ -1606,6 +1720,11 @@ function escapeCalendarText(value = '') {
 function formatShortDate(date) {
   if (!date) return '';
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function formatShortWeekday(date) {
+  if (!date) return '';
+  return date.toLocaleDateString(undefined, { weekday: 'short' });
 }
 
 function formatLongDate(date) {
@@ -1741,6 +1860,7 @@ function HomeScreen({
   calendarMeals,
   latestShoppingPlan,
   onViewShoppingList,
+  onViewCalendarMeal,
   onStartGuided,
   onStartPantry,
   onDeleteAccount
@@ -1779,7 +1899,7 @@ function HomeScreen({
           </View>
           <View style={styles.homeActionText}>
             <Text style={styles.homeActionTitle}>Find recipes from my pantry</Text>
-            <Text style={styles.homeActionSub}>Enter what you have, then build meal ideas around those ingredients.</Text>
+            <Text style={styles.homeActionSub}>Snap a pantry photo, confirm ingredients, then build meal ideas around them.</Text>
           </View>
         </Pressable>
       </View>
@@ -1788,6 +1908,7 @@ function HomeScreen({
         meals={calendarMeals}
         latestShoppingPlan={latestShoppingPlan}
         onViewShoppingList={onViewShoppingList}
+        onViewMeal={onViewCalendarMeal}
       />
 
       <Pressable
@@ -1802,7 +1923,7 @@ function HomeScreen({
   );
 }
 
-function HomeCalendar({ meals = [], latestShoppingPlan, onViewShoppingList }) {
+function HomeCalendar({ meals = [], latestShoppingPlan, onViewShoppingList, onViewMeal }) {
   if (!meals.length) return null;
   const hasShoppingList = hasShoppingPlan(latestShoppingPlan);
 
@@ -1832,6 +1953,7 @@ function HomeCalendar({ meals = [], latestShoppingPlan, onViewShoppingList }) {
           <CalendarPlus color={COLORS.cardinal} size={20} strokeWidth={2.6} />
         )}
       </View>
+      <Text style={styles.homeCalendarHint}>Tap a meal to open the recipe.</Text>
       {Array.from(groups.entries()).map(([dateKey, dayMeals]) => {
         const date = new Date(`${dateKey}T12:00:00`);
         const sortedMeals = [...dayMeals].sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')));
@@ -1840,7 +1962,13 @@ function HomeCalendar({ meals = [], latestShoppingPlan, onViewShoppingList }) {
           <View key={dateKey} style={styles.homeCalendarDay}>
             <Text style={styles.homeCalendarDate}>{formatLongDate(date)}</Text>
             {sortedMeals.map((meal) => (
-              <View key={meal.id} style={styles.homeCalendarMeal}>
+              <Pressable
+                key={meal.id}
+                onPress={() => onViewMeal?.(meal)}
+                accessibilityRole="button"
+                accessibilityLabel={`Open recipe for ${meal.name}`}
+                style={styles.homeCalendarMeal}
+              >
                 <View style={styles.homeCalendarTime}>
                   <Text style={styles.homeCalendarTimeText}>{meal.time}</Text>
                 </View>
@@ -1850,7 +1978,7 @@ function HomeCalendar({ meals = [], latestShoppingPlan, onViewShoppingList }) {
                     {meal.mealType} - {meal.calories} cals, {meal.protein}g protein
                   </Text>
                 </View>
-              </View>
+              </Pressable>
             ))}
           </View>
         );
@@ -1894,6 +2022,133 @@ function ShoppingListScreen({ latestShoppingPlan, onStartGuided }) {
   );
 }
 
+function CalendarRecipeScreen({ meal }) {
+  const recipe = getRecipeFromCalendarMeal(meal);
+  const date = meal?.start ? new Date(meal.start) : null;
+
+  return (
+    <ScrollView
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode={KEYBOARD_DISMISS_MODE}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.resultScroll}
+    >
+      <View style={styles.resultHero}>
+        <CardinalMascot compact active={false} />
+        <Text style={styles.resultTitle}>{meal?.name || 'Saved recipe'}</Text>
+        <Text style={styles.resultSubtitle}>
+          {date ? `${formatLongDate(date)} at ${meal.time}` : 'Meal calendar entry'}
+        </Text>
+      </View>
+
+      {recipe ? (
+        <RecipeModule meal={recipe} />
+      ) : (
+        <View style={styles.pantryEmptyPanel}>
+          <Text style={styles.cachedHomeTitle}>Recipe details unavailable</Text>
+          <Text style={styles.cachedEmpty}>This calendar entry was saved before full recipe details were stored.</Text>
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+function PantryScanIntro({
+  scanned,
+  pantryPhotoUri,
+  pantryScanStatus,
+  isAnalyzingPhoto,
+  isLoading,
+  onTakePhoto,
+  onPickPhoto
+}) {
+  const isBusy = isAnalyzingPhoto || isLoading;
+  const scanCopy = pantryScanStatus === 'empty'
+    ? 'I could not detect pantry ingredients in that photo.'
+    : pantryScanStatus === 'detected'
+      ? 'Scan complete. Review the ingredients I found.'
+      : 'Aim at a cabinet, fridge shelf, or countertop ingredients.';
+
+  return (
+    <View style={styles.pantryScanShell}>
+      <View style={styles.pantryScanHeader}>
+        <View>
+          <Text style={styles.scanKicker}>Pantry scan</Text>
+          <Text style={styles.scanTitle}>{scanned ? 'Review the scan.' : 'Snap what you have.'}</Text>
+        </View>
+        <CardinalMascot compact active={isAnalyzingPhoto} />
+      </View>
+
+      <Pressable
+        onPress={onTakePhoto}
+        disabled={isBusy}
+        style={[styles.scanCameraFrame, isBusy && styles.continueDisabled]}
+      >
+        {pantryPhotoUri ? (
+          <Image source={{ uri: pantryPhotoUri }} style={styles.scanCameraImage} />
+        ) : (
+          <>
+            <View style={[styles.scanCorner, styles.scanCornerTopLeft]} />
+            <View style={[styles.scanCorner, styles.scanCornerTopRight]} />
+            <View style={[styles.scanCorner, styles.scanCornerBottomLeft]} />
+            <View style={[styles.scanCorner, styles.scanCornerBottomRight]} />
+            <Camera color={COLORS.white} size={42} strokeWidth={2.4} />
+            <Text style={styles.scanCameraText}>Scan cabinet or fridge</Text>
+          </>
+        )}
+        {isAnalyzingPhoto ? (
+          <View style={styles.scanOverlay}>
+            <ActivityIndicator color={COLORS.white} />
+            <Text style={styles.scanOverlayText}>Reading visible food...</Text>
+          </View>
+        ) : null}
+      </Pressable>
+
+      <Text style={styles.scanCaption}>{scanCopy}</Text>
+
+      <View style={styles.photoActionRow}>
+        <Pressable
+          onPress={onTakePhoto}
+          disabled={isBusy}
+          style={[styles.photoActionButton, isBusy && styles.continueDisabled]}
+        >
+          <Camera color={COLORS.cardinal} size={22} strokeWidth={2.8} />
+          <Text style={styles.photoActionText}>{scanned ? 'Retake' : 'Snap pantry'}</Text>
+        </Pressable>
+        <Pressable
+          onPress={onPickPhoto}
+          disabled={isBusy}
+          style={[styles.photoActionButton, isBusy && styles.continueDisabled]}
+        >
+          <ImagePlus color={COLORS.cardinal} size={22} strokeWidth={2.8} />
+          <Text style={styles.photoActionText}>Choose photo</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function DetectedIngredients({ ingredients = [] }) {
+  return (
+    <View style={styles.detectedIngredientPanel}>
+      <Text style={styles.cachedHomeTitle}>Detected ingredients</Text>
+      <View style={styles.detectedIngredientList}>
+        {ingredients.map((ingredient) => (
+          <Text
+            key={`${ingredient.name}-${ingredient.category}`}
+            style={[
+              styles.detectedIngredientPill,
+              ingredient.confidence === 'low' && styles.detectedIngredientPillLow
+            ]}
+          >
+            {ingredient.name}
+          </Text>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function PantryFinderScreen({
   pantryIngredients,
   setPantryIngredients,
@@ -1904,15 +2159,18 @@ function PantryFinderScreen({
   pantryMealType,
   setPantryMealType,
   pantryRecipes,
+  pantryScanStatus,
   onFindRecipes,
   onPickPhoto,
   onTakePhoto,
+  onAddRecipeToCalendar,
   isAnalyzingPhoto,
   isLoading,
   error,
   note
 }) {
   const hasIngredients = mergeIngredientText(pantryIngredients, splitRawIngredients(pantryProteinInput)).trim().length > 0;
+  const scanned = pantryPhotoUri || pantryScanStatus !== 'idle';
 
   return (
     <ScrollView
@@ -1921,109 +2179,78 @@ function PantryFinderScreen({
       showsVerticalScrollIndicator={false}
       contentContainerStyle={styles.homeScroll}
     >
-      <View style={styles.homeHero}>
-        <View style={styles.menuGuideRow}>
-          <CardinalMascot compact active={false} />
-          <View style={styles.guideBubble}>
-            <Text style={styles.guideText}>Tell me what you already have. I will build meals from those items plus small seasonings or sauces.</Text>
-          </View>
-        </View>
-        <Text style={styles.homeTitle}>What is in your pantry?</Text>
-      </View>
+      <PantryScanIntro
+        scanned={Boolean(scanned)}
+        pantryPhotoUri={pantryPhotoUri}
+        pantryScanStatus={pantryScanStatus}
+        isAnalyzingPhoto={isAnalyzingPhoto}
+        isLoading={isLoading}
+        onTakePhoto={onTakePhoto}
+        onPickPhoto={onPickPhoto}
+      />
 
-      <View style={styles.photoActionRow}>
-        <Pressable
-          onPress={onTakePhoto}
-          disabled={isAnalyzingPhoto || isLoading}
-          style={[styles.photoActionButton, (isAnalyzingPhoto || isLoading) && styles.continueDisabled]}
-        >
-          <Camera color={COLORS.cardinal} size={22} strokeWidth={2.8} />
-          <Text style={styles.photoActionText}>Snap pantry</Text>
-        </Pressable>
-        <Pressable
-          onPress={onPickPhoto}
-          disabled={isAnalyzingPhoto || isLoading}
-          style={[styles.photoActionButton, (isAnalyzingPhoto || isLoading) && styles.continueDisabled]}
-        >
-          <ImagePlus color={COLORS.cardinal} size={22} strokeWidth={2.8} />
-          <Text style={styles.photoActionText}>Choose photo</Text>
-        </Pressable>
-      </View>
+      {pantryDetectedIngredients.length ? <DetectedIngredients ingredients={pantryDetectedIngredients} /> : null}
 
-      {pantryPhotoUri ? (
-        <View style={styles.pantryPhotoPanel}>
-          <Image source={{ uri: pantryPhotoUri }} style={styles.pantryPhotoPreview} />
-          <View style={styles.pantryPhotoText}>
-            <Text style={styles.cachedHomeTitle}>{isAnalyzingPhoto ? 'Reading your pantry' : 'Photo scanned'}</Text>
-            <Text style={styles.cachedEmpty}>
-              {isAnalyzingPhoto ? 'I am identifying visible ingredients.' : 'Review the ingredients below before finding meals.'}
-            </Text>
-          </View>
-        </View>
-      ) : null}
+      {scanned ? (
+        <View style={styles.pantryConfirmPanel}>
+          <Text style={styles.confirmPanelTitle}>Anything else?</Text>
+          <Text style={styles.cachedEmpty}>Add proteins or ingredients the scan missed, then I will search around the whole list.</Text>
 
-      {pantryDetectedIngredients.length ? (
-        <View style={styles.detectedIngredientPanel}>
-          <Text style={styles.cachedHomeTitle}>Detected ingredients</Text>
-          <View style={styles.detectedIngredientList}>
-            {pantryDetectedIngredients.map((ingredient) => (
-              <Text key={`${ingredient.name}-${ingredient.category}`} style={styles.detectedIngredientPill}>
-                {ingredient.name}
-              </Text>
-            ))}
-          </View>
+          <Field label="Detected or typed ingredients">
+            <TextInput
+              value={pantryIngredients}
+              onChangeText={setPantryIngredients}
+              placeholder="Example: rice, broccoli, salsa"
+              placeholderTextColor="#999999"
+              style={styles.cleanInput}
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={dismissKeyboard}
+              {...TEXT_INPUT_DONE_PROPS}
+            />
+          </Field>
+
+          <Field label="Other proteins or ingredients">
+            <TextInput
+              value={pantryProteinInput}
+              onChangeText={setPantryProteinInput}
+              placeholder="Example: chicken breast, steak, tofu, eggs"
+              placeholderTextColor="#999999"
+              style={styles.cleanInput}
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={dismissKeyboard}
+              {...TEXT_INPUT_DONE_PROPS}
+            />
+          </Field>
         </View>
       ) : null}
 
-      <Field label="Pantry or fridge ingredients">
-        <TextInput
-          value={pantryIngredients}
-          onChangeText={setPantryIngredients}
-          placeholder="Example: chicken, rice, broccoli, salsa"
-          placeholderTextColor="#999999"
-          style={styles.cleanInput}
-          returnKeyType="done"
-          blurOnSubmit
-          onSubmitEditing={dismissKeyboard}
-          {...TEXT_INPUT_DONE_PROPS}
-        />
-      </Field>
+      {scanned ? (
+        <View style={styles.pantryTypeRow}>
+          {['Breakfast', 'Lunch', 'Dinner', 'Snack'].map((mealType) => (
+            <PillOption
+              key={mealType}
+              label={mealType}
+              selected={pantryMealType === mealType}
+              onPress={() => setPantryMealType(mealType)}
+            />
+          ))}
+        </View>
+      ) : null}
 
-      <Field label="Protein to include">
-        <TextInput
-          value={pantryProteinInput}
-          onChangeText={setPantryProteinInput}
-          placeholder="Example: chicken breast, steak, tofu, eggs"
-          placeholderTextColor="#999999"
-          style={styles.cleanInput}
-          returnKeyType="done"
-          blurOnSubmit
-          onSubmitEditing={dismissKeyboard}
-          {...TEXT_INPUT_DONE_PROPS}
-        />
-      </Field>
-
-      <View style={styles.pantryTypeRow}>
-        {['Breakfast', 'Lunch', 'Dinner', 'Snack'].map((mealType) => (
-          <PillOption
-            key={mealType}
-            label={mealType}
-            selected={pantryMealType === mealType}
-            onPress={() => setPantryMealType(mealType)}
-          />
-        ))}
-      </View>
-
-      <Pressable
-        onPress={onFindRecipes}
-        disabled={!hasIngredients || isLoading || isAnalyzingPhoto}
-        style={[styles.homePlanButton, (!hasIngredients || isLoading || isAnalyzingPhoto) && styles.continueDisabled]}
-      >
-        {isLoading ? <ActivityIndicator color={COLORS.white} /> : null}
-        <Text style={styles.homePlanButtonText}>
-          {isLoading ? 'Building meals' : isAnalyzingPhoto ? 'Reading photo' : 'Find meals from pantry'}
-        </Text>
-      </Pressable>
+      {scanned ? (
+        <Pressable
+          onPress={onFindRecipes}
+          disabled={!hasIngredients || isLoading || isAnalyzingPhoto}
+          style={[styles.homePlanButton, (!hasIngredients || isLoading || isAnalyzingPhoto) && styles.continueDisabled]}
+        >
+          {isLoading ? <ActivityIndicator color={COLORS.white} /> : null}
+          <Text style={styles.homePlanButtonText}>
+            {isLoading ? 'Finding recipes' : isAnalyzingPhoto ? 'Reading photo' : 'Find recipes'}
+          </Text>
+        </Pressable>
+      ) : null}
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
       {note && pantryRecipes.length ? <Text style={styles.pantryNote}>{note}</Text> : null}
@@ -2032,12 +2259,16 @@ function PantryFinderScreen({
         hasIngredients={hasIngredients}
         recipes={pantryRecipes}
         isLoading={isLoading}
+        onAddToCalendar={onAddRecipeToCalendar}
       />
     </ScrollView>
   );
 }
 
-function PantryRecipeResults({ hasIngredients, recipes = [], isLoading }) {
+function PantryRecipeResults({ hasIngredients, recipes = [], isLoading, onAddToCalendar }) {
+  const [openRecipeId, setOpenRecipeId] = useState('');
+  const calendarDates = useMemo(() => getScheduledDates(7, false), []);
+
   if (!hasIngredients) {
     return (
       <View style={styles.pantryEmptyPanel}>
@@ -2093,6 +2324,30 @@ function PantryRecipeResults({ hasIngredients, recipes = [], isLoading }) {
                   <ExternalLink color={COLORS.cardinal} size={13} />
                 </Pressable>
               ))}
+            </View>
+          ) : null}
+          <Pressable
+            onPress={() => setOpenRecipeId((current) => (current === (recipe.id || recipe.name) ? '' : (recipe.id || recipe.name)))}
+            style={styles.addRecipeCalendarButton}
+          >
+            <CalendarPlus color={COLORS.white} size={18} strokeWidth={2.8} />
+            <Text style={styles.addRecipeCalendarText}>Add to my calendar</Text>
+          </Pressable>
+          {openRecipeId === (recipe.id || recipe.name) ? (
+            <View style={styles.calendarDayPicker}>
+              <Text style={styles.calendarDayPickerTitle}>Pick a day</Text>
+              <View style={styles.calendarDayPickerGrid}>
+                {calendarDates.map((date) => (
+                  <Pressable
+                    key={date.toISOString()}
+                    onPress={() => onAddToCalendar?.(recipe, date)}
+                    style={styles.calendarDayChoice}
+                  >
+                    <Text style={styles.calendarDayChoiceText}>{formatShortWeekday(date)}</Text>
+                    <Text style={styles.calendarDayChoiceDate}>{formatShortDate(date)}</Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
           ) : null}
         </View>
@@ -3132,6 +3387,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12
   },
+  homeCalendarHint: {
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+    marginTop: -6
+  },
   homeShoppingButton: {
     minHeight: 40,
     borderRadius: 999,
@@ -3203,10 +3465,112 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800'
   },
+  pantryScanShell: {
+    backgroundColor: COLORS.pale2,
+    borderRadius: 24,
+    padding: 16,
+    gap: 14,
+    marginBottom: 16
+  },
+  pantryScanHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  scanKicker: {
+    color: COLORS.cardinal,
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase'
+  },
+  scanTitle: {
+    color: COLORS.ink,
+    fontSize: 26,
+    lineHeight: 32,
+    fontWeight: '900',
+    marginTop: 2
+  },
+  scanCameraFrame: {
+    minHeight: 360,
+    aspectRatio: 0.72,
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
+    borderRadius: 28,
+    backgroundColor: '#111111',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden'
+  },
+  scanCameraImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover'
+  },
+  scanCameraText: {
+    color: COLORS.white,
+    fontSize: 22,
+    fontWeight: '900',
+    marginTop: 14
+  },
+  scanCaption: {
+    color: COLORS.muted,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '700',
+    textAlign: 'center'
+  },
+  scanOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.54)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10
+  },
+  scanOverlayText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '900'
+  },
+  scanCorner: {
+    position: 'absolute',
+    width: 58,
+    height: 58,
+    borderColor: COLORS.white
+  },
+  scanCornerTopLeft: {
+    top: 34,
+    left: 34,
+    borderTopWidth: 5,
+    borderLeftWidth: 5,
+    borderTopLeftRadius: 16
+  },
+  scanCornerTopRight: {
+    top: 34,
+    right: 34,
+    borderTopWidth: 5,
+    borderRightWidth: 5,
+    borderTopRightRadius: 16
+  },
+  scanCornerBottomLeft: {
+    bottom: 34,
+    left: 34,
+    borderBottomWidth: 5,
+    borderLeftWidth: 5,
+    borderBottomLeftRadius: 16
+  },
+  scanCornerBottomRight: {
+    bottom: 34,
+    right: 34,
+    borderBottomWidth: 5,
+    borderRightWidth: 5,
+    borderBottomRightRadius: 16
+  },
   photoActionRow: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 16
+    marginBottom: 0
   },
   photoActionButton: {
     flex: 1,
@@ -3264,6 +3628,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800'
   },
+  detectedIngredientPillLow: {
+    color: COLORS.muted,
+    borderWidth: 1,
+    borderColor: COLORS.line
+  },
+  pantryConfirmPanel: {
+    backgroundColor: COLORS.pale2,
+    borderRadius: 22,
+    padding: 16,
+    gap: 14,
+    marginBottom: 16
+  },
+  confirmPanelTitle: {
+    color: COLORS.ink,
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: '900'
+  },
   pantryTypeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -3304,6 +3686,61 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginTop: 3,
     flexShrink: 1
+  },
+  addRecipeCalendarButton: {
+    minHeight: 48,
+    borderRadius: 15,
+    backgroundColor: COLORS.green,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 2
+  },
+  addRecipeCalendarText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '900'
+  },
+  calendarDayPicker: {
+    backgroundColor: '#fff8df',
+    borderWidth: 1,
+    borderColor: '#f1df9b',
+    borderRadius: 16,
+    padding: 12,
+    gap: 10
+  },
+  calendarDayPickerTitle: {
+    color: COLORS.ink,
+    fontSize: 16,
+    fontWeight: '900'
+  },
+  calendarDayPickerGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8
+  },
+  calendarDayChoice: {
+    minWidth: 82,
+    minHeight: 52,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  calendarDayChoiceText: {
+    color: COLORS.cardinal,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase'
+  },
+  calendarDayChoiceDate: {
+    color: COLORS.ink,
+    fontSize: 15,
+    fontWeight: '900',
+    marginTop: 1
   },
   stepHeader: {
     marginBottom: 26
