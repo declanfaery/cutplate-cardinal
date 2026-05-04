@@ -156,6 +156,21 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
       });
     }
 
+    const cachedPantryRecipes = await getCachedPantryRecipes({ pantryIngredients, mealType });
+    if (cachedPantryRecipes.length >= getPantryCacheMinRecipes()) {
+      return res.json({
+        recipes: cachedPantryRecipes,
+        usedIngredients: splitPantryIngredients(pantryIngredients),
+        note: 'Found cached recipe matches for those pantry ingredients.',
+        cache: {
+          hit: true,
+          source: 'recipe-index',
+          count: cachedPantryRecipes.length,
+          key: buildPlanCacheKey(preferences)
+        }
+      });
+    }
+
     if (!process.env.OPENAI_API_KEY) {
       return res.status(503).json({
         error: 'Sourced recipe gathering is not configured. Add OPENAI_API_KEY and try again.'
@@ -216,6 +231,11 @@ app.post('/api/plan', async (req, res) => {
 
   if (cached && (!aiConfigured || cached.mode === 'ai')) {
     return res.json(cached);
+  }
+
+  const cachedRecipeResponse = await buildCachedRecipePlanResponse(preferences);
+  if (cachedRecipeResponse) {
+    return res.json(cachedRecipeResponse);
   }
 
   if (aiConfigured) {
@@ -307,6 +327,191 @@ app.use((error, req, res, next) => {
 app.listen(port, () => {
   console.log(`CutPlate AI API running on http://localhost:${port}`);
 });
+
+async function buildCachedRecipePlanResponse(preferences) {
+  const recipes = await getCachedMenuRecipes(preferences);
+  if (!hasEnoughCachedMenuRecipes(recipes, preferences)) return null;
+
+  const recipeLibrary = selectCachedMenuRecipes(recipes, preferences);
+  const plan = attachGroceryEstimate(buildRecipeIndexPlan(preferences, recipeLibrary), preferences);
+
+  return {
+    plan,
+    warnings: [],
+    mode: 'cache',
+    cache: {
+      hit: true,
+      source: 'recipe-index',
+      key: buildPlanCacheKey(preferences),
+      count: recipeLibrary.length
+    }
+  };
+}
+
+async function getCachedPantryRecipes({ pantryIngredients, mealType }) {
+  const pantryTerms = splitPantryIngredients(pantryIngredients);
+  const cachedRecipes = await listCachedRecipes({
+    ingredients: pantryTerms,
+    limit: 80
+  });
+
+  return uniqueRecipes(cachedRecipes)
+    .filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType)
+    .slice(0, 12);
+}
+
+async function getCachedMenuRecipes(preferences) {
+  const pantryTerms = splitPantryIngredients(preferences.pantryIngredients);
+  const proteinTerms = Array.isArray(preferences.proteins) ? preferences.proteins : [];
+  const searchTerms = pantryTerms.length ? [...pantryTerms, ...proteinTerms] : proteinTerms;
+  const cachedRecipes = await listCachedRecipes({
+    ingredients: searchTerms,
+    limit: 220
+  });
+
+  const mealTypes = new Set(getPreferenceMealTypes(preferences));
+  const avoidTerms = splitPantryIngredients(`${preferences.avoidIngredients || ''}, ${(preferences.allergies || []).join(', ')}`)
+    .map((term) => term.toLowerCase());
+
+  return uniqueRecipes(cachedRecipes).filter((recipe) => {
+    if (mealTypes.size && !mealTypes.has(normalizePantryMealType(recipe.mealType))) return false;
+    if (!recipeMatchesSelectedProtein(recipe, preferences.proteins)) return false;
+
+    const searchable = [
+      recipe.name,
+      recipe.protein,
+      recipe.description,
+      ...(recipe.ingredients || [])
+    ].join(' ').toLowerCase();
+
+    return !avoidTerms.some((term) => term && searchable.includes(term));
+  });
+}
+
+function hasEnoughCachedMenuRecipes(recipes, preferences) {
+  if (!recipes.length) return false;
+
+  const requiredCounts = getRequiredMealCounts(preferences);
+  const requiredTypes = Object.keys(requiredCounts);
+  if (!requiredTypes.length) return false;
+
+  for (const mealType of requiredTypes) {
+    const count = recipes.filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType).length;
+    const minForType = Math.min(8, Math.max(3, requiredCounts[mealType]));
+    if (count < minForType) return false;
+  }
+
+  const requiredSlots = Object.values(requiredCounts).reduce((total, count) => total + count, 0);
+  const minTotal = Math.min(25, Math.max(requiredSlots * 2, requiredTypes.length * 6));
+  return recipes.length >= minTotal;
+}
+
+function selectCachedMenuRecipes(recipes, preferences) {
+  const requiredTypes = Object.keys(getRequiredMealCounts(preferences));
+  const grouped = new Map(requiredTypes.map((mealType) => [
+    mealType,
+    recipes.filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType)
+  ]));
+  const selected = [];
+  let cursor = 0;
+
+  while (selected.length < 50) {
+    let added = false;
+
+    for (const mealType of requiredTypes) {
+      const bucket = grouped.get(mealType) || [];
+      const recipe = bucket[cursor];
+      if (!recipe) continue;
+
+      selected.push(recipe);
+      added = true;
+      if (selected.length >= 50) break;
+    }
+
+    if (!added) break;
+    cursor += 1;
+  }
+
+  return uniqueRecipes(selected).slice(0, 50);
+}
+
+function buildRecipeIndexPlan(preferences, recipeLibrary) {
+  return {
+    id: `cached-recipes-${Date.now()}`,
+    title: 'Cached Recipe Options',
+    generatedAt: new Date().toISOString(),
+    generatedBy: 'recipe-cache',
+    preferences,
+    summary: summarizeRecipeLibrary(preferences, recipeLibrary),
+    days: [],
+    recipeLibrary,
+    shoppingList: [],
+    sourceNotes: SOURCE_POLICY_NOTES,
+    safetyNote:
+      'Recipes, macros, and grocery prices are planning estimates. Confirm ingredients, allergies, and cook proteins to food-safe temperatures.'
+  };
+}
+
+function summarizeRecipeLibrary(preferences, recipes) {
+  return {
+    days: Number(preferences.days || 0),
+    mealsPerDay: getPreferenceMealTypes(preferences).length,
+    totalMeals: Number(preferences.days || 0) * getPreferenceMealTypes(preferences).length,
+    averageCalories: averageRecipeMacro(recipes, 'calories'),
+    averageProtein: averageRecipeMacro(recipes, 'protein'),
+    averageCarbs: averageRecipeMacro(recipes, 'carbs'),
+    averageFat: averageRecipeMacro(recipes, 'fat')
+  };
+}
+
+function getRequiredMealCounts(preferences) {
+  const days = Math.max(1, Number(preferences.days || 1));
+  return (preferences.mealSlots || []).reduce((counts, slot) => {
+    const mealType = normalizePantryMealType(slot.type || slot.mealType);
+    counts[mealType] = (counts[mealType] || 0) + days;
+    return counts;
+  }, {});
+}
+
+function getPreferenceMealTypes(preferences) {
+  return [...new Set((preferences.mealSlots || [])
+    .map((slot) => normalizePantryMealType(slot.type || slot.mealType))
+    .filter(Boolean))];
+}
+
+function uniqueRecipes(recipes = []) {
+  const seen = new Set();
+  const unique = [];
+
+  for (const recipe of recipes) {
+    if (!recipe?.name || !recipe?.mealType) continue;
+    const key = `${String(recipe.mealType).toLowerCase()}-${String(recipe.name).toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(recipe);
+  }
+
+  return unique;
+}
+
+function recipeMatchesSelectedProtein(recipe, proteins = []) {
+  const selected = (proteins || []).map((protein) => String(protein || '').trim().toLowerCase()).filter(Boolean);
+  if (!selected.length) return true;
+
+  const searchable = [
+    recipe.protein,
+    recipe.name,
+    recipe.description,
+    ...(recipe.ingredients || [])
+  ].join(' ').toLowerCase();
+
+  return selected.some((protein) => searchable.includes(protein));
+}
+
+function getPantryCacheMinRecipes() {
+  const configured = Number(process.env.PANTRY_CACHE_MIN_RECIPES);
+  return Number.isFinite(configured) && configured > 0 ? configured : 4;
+}
 
 function getOrStartAiPlan(preferences) {
   const key = buildPlanCacheKey(preferences);

@@ -2,7 +2,7 @@
   "expo": {
     "name": "CutPlate AI",
     "slug": "cutplate-ai",
-    "version": "1.0.0",
+    "version": "1.5.0",
     "orientation": "portrait",
     "scheme": "cutplate",
     "icon": "./assets/icon.png",
