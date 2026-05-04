@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -105,6 +105,65 @@ test('plan cache lists pantry-matching cached recipes', async () => {
     assert.equal(recipes.length, 1);
     assert.equal(recipes[0].name, 'Chicken Rice Bowl');
     assert.equal(recipes[0].cached, true);
+  } finally {
+    if (originalCacheDir === undefined) {
+      delete process.env.PLAN_CACHE_DIR;
+    } else {
+      process.env.PLAN_CACHE_DIR = originalCacheDir;
+    }
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+});
+
+test('plan cache writes a recipe-level index for generated recipes', async () => {
+  const cacheDir = await mkdtemp(path.join(tmpdir(), 'cutplate-cache-'));
+  const originalCacheDir = process.env.PLAN_CACHE_DIR;
+  process.env.PLAN_CACHE_DIR = cacheDir;
+
+  try {
+    const preferences = normalizePreferences({
+      days: 3,
+      proteins: ['Salmon'],
+      mealSlots: [{ type: 'Dinner', time: '6:30 PM' }]
+    });
+    const response = {
+      mode: 'ai',
+      warnings: [],
+      plan: {
+        id: 'recipe-index-plan',
+        preferences,
+        days: [],
+        summary: { totalMeals: 0 },
+        recipeLibrary: [
+          {
+            id: 'salmon-quinoa',
+            mealType: 'Dinner',
+            time: '6:30 PM',
+            name: 'Lemon Dill Salmon with Quinoa',
+            protein: 'Salmon',
+            description: 'Salmon with quinoa, broccoli, and lemon dill yogurt sauce.',
+            macros: { calories: 610, protein: 45, carbs: 42, fat: 18 },
+            ingredients: ['6 oz salmon fillet', '1 cup cooked quinoa', '1 cup broccoli', '1 tbsp lemon juice'],
+            steps: [],
+            sources: [{ label: 'Public recipe source', url: 'https://example.com/salmon', platform: 'web' }]
+          }
+        ]
+      }
+    };
+
+    await setCachedPlan(preferences, response);
+
+    const recipeDir = path.join(cacheDir, '_recipes');
+    const recipeFiles = (await readdir(recipeDir)).filter((file) => file.endsWith('.json'));
+    assert.equal(recipeFiles.length, 1);
+
+    const indexed = JSON.parse(await readFile(path.join(recipeDir, recipeFiles[0]), 'utf8'));
+    assert.equal(indexed.recipe.name, 'Lemon Dill Salmon with Quinoa');
+    assert.equal(indexed.sourcePlanKey, buildPlanCacheKey(preferences));
+
+    const recipes = await listCachedRecipes({ ingredients: ['quinoa'], limit: 10 });
+    assert.equal(recipes.length, 1);
+    assert.equal(recipes[0].cacheSource, 'recipe-index');
   } finally {
     if (originalCacheDir === undefined) {
       delete process.env.PLAN_CACHE_DIR;
