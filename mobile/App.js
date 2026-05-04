@@ -33,7 +33,8 @@ import {
   Plus,
   RefreshCw,
   ShoppingCart,
-  Sparkles
+  Sparkles,
+  Trash2
 } from 'lucide-react-native';
 
 const API_URL =
@@ -352,6 +353,13 @@ export default function App() {
   const viewShoppingList = () => {
     setError('');
     setAppMode('shopping');
+  };
+
+  const clearSavedCalendar = async () => {
+    setCalendarMeals([]);
+    setLatestShoppingPlan(null);
+    setActiveCalendarMeal(null);
+    await AsyncStorage.multiRemove([CALENDAR_STORAGE_KEY, SHOPPING_LIST_STORAGE_KEY]);
   };
 
   const updatePantryFinderIngredients = (value) => {
@@ -1037,6 +1045,7 @@ export default function App() {
             latestShoppingPlan={latestShoppingPlan}
             onViewShoppingList={viewShoppingList}
             onViewCalendarMeal={openCalendarMeal}
+            onClearCalendar={clearSavedCalendar}
             onStartGuided={startGuidedPlan}
             onStartPantry={startPantryFinder}
             onDeleteAccount={deleteAccount}
@@ -1986,6 +1995,7 @@ function HomeScreen({
   latestShoppingPlan,
   onViewShoppingList,
   onViewCalendarMeal,
+  onClearCalendar,
   onStartGuided,
   onStartPantry,
   onDeleteAccount
@@ -2034,6 +2044,7 @@ function HomeScreen({
         latestShoppingPlan={latestShoppingPlan}
         onViewShoppingList={onViewShoppingList}
         onViewMeal={onViewCalendarMeal}
+        onClearCalendar={onClearCalendar}
       />
 
       <Pressable
@@ -2048,9 +2059,21 @@ function HomeScreen({
   );
 }
 
-function HomeCalendar({ meals = [], latestShoppingPlan, onViewShoppingList, onViewMeal }) {
+function HomeCalendar({ meals = [], latestShoppingPlan, onViewShoppingList, onViewMeal, onClearCalendar }) {
+  const [clearArmed, setClearArmed] = useState(false);
+
   if (!meals.length) return null;
   const hasShoppingList = hasShoppingPlan(latestShoppingPlan);
+
+  const handleClear = () => {
+    if (!clearArmed) {
+      setClearArmed(true);
+      return;
+    }
+
+    setClearArmed(false);
+    onClearCalendar?.();
+  };
 
   const groups = meals.reduce((map, meal) => {
     const key = meal.date || meal.start || 'planned';
@@ -2108,6 +2131,17 @@ function HomeCalendar({ meals = [], latestShoppingPlan, onViewShoppingList, onVi
           </View>
         );
       })}
+      <Pressable
+        onPress={handleClear}
+        accessibilityRole="button"
+        accessibilityLabel={clearArmed ? 'Confirm clear meal calendar' : 'Clear meal calendar'}
+        style={[styles.homeClearCalendarButton, clearArmed && styles.homeClearCalendarButtonArmed]}
+      >
+        <Trash2 color={COLORS.cardinal} size={17} strokeWidth={2.8} />
+        <Text style={styles.homeClearCalendarText}>
+          {clearArmed ? 'Tap again to clear calendar' : 'Clear calendar'}
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -3636,6 +3670,29 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
     marginTop: 2
+  },
+  homeClearCalendarButton: {
+    minHeight: 46,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: '#ffd5dc',
+    backgroundColor: COLORS.white,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 2
+  },
+  homeClearCalendarButtonArmed: {
+    backgroundColor: '#fff2f4',
+    borderColor: COLORS.cardinal
+  },
+  homeClearCalendarText: {
+    color: COLORS.cardinal,
+    fontSize: 14,
+    fontWeight: '900'
   },
   deleteAccountButton: {
     alignSelf: 'center',
