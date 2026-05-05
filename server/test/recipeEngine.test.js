@@ -241,5 +241,5 @@ test('explicit meat ounces are not multiplied into impossible fillet counts', ()
   const chicken = estimate.lineItems.find((item) => item.name === 'Chicken breasts');
 
   assert.equal(salmon.quantityLabel, '1 pack (~1 lb, 2-3 fillets; need ~1 lb)');
-  assert.equal(chicken.quantityLabel, '1 tray (~1.5 lb, 3-4 breasts; need ~12 oz)');
+  assert.equal(chicken.quantityLabel, '1 tray (~2 lb, 3-4 breasts; need ~12 oz)');
 });

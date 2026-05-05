@@ -92,7 +92,7 @@ export const SAVED_RECIPES = [
     description: 'A high-protein taco-style bake with chicken, tortillas, beans, salsa, and a light cheese finish.',
     macroRating: 'SUPER FIT',
     prepTime: '40 minutes',
-    baseServings: 6,
+    baseServings: 10,
     macros: { calories: 510, protein: 48, carbs: 42, fat: 14 },
     ingredients: [
       '2 lb chicken breast',

@@ -14,7 +14,7 @@ const ZIP_MULTIPLIERS = [
 
 const PRICE_RULES = [
   { pattern: /chicken thighs?/i, label: 'Chicken thighs', unit: 'oz', price: 3.49 / 16, measure: 'servingOunces', ouncesPerServing: 5, storePackage: fixedPackage(24, 7.49, 'tray', 'trays', '~1.5 lb') },
-  { pattern: /chicken/i, label: 'Chicken breasts', unit: 'oz', price: 3.99 / 16, measure: 'servingOunces', ouncesPerServing: 6, storePackage: fixedPackage(24, 8.49, 'tray', 'trays', '~1.5 lb, 3-4 breasts') },
+  { pattern: /chicken/i, label: 'Chicken breasts', unit: 'oz', price: 3.99 / 16, measure: 'servingOunces', ouncesPerServing: 6, storePackage: fixedPackage(32, 11.49, 'tray', 'trays', '~2 lb, 3-4 breasts') },
   { pattern: /tuna/i, label: 'Canned tuna', unit: 'oz', price: 1.39 / 5, measure: 'servingOunces', ouncesPerServing: 5, storePackage: fixedPackage(5, 1.39, 'can', 'cans', '5 oz') },
   { pattern: /salmon/i, label: 'Salmon fillets', unit: 'oz', price: 11.99 / 16, measure: 'servingOunces', ouncesPerServing: 6, storePackage: fixedPackage(16, 11.99, 'pack', 'packs', '~1 lb, 2-3 fillets') },
   { pattern: /steak|sirloin/i, label: 'Sirloin steak', unit: 'oz', price: 14.99 / 16, measure: 'servingOunces', ouncesPerServing: 6, storePackage: weightPackage(8, 4, 'steak pack') },

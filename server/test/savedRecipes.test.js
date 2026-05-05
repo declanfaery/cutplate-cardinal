@@ -76,6 +76,35 @@ test('saved repeat recipes scale grocery quantities from selected days and servi
   }
 });
 
+test('chicken taco bake repeat plan buys a realistic chicken tray for ten servings', () => {
+  const preferences = normalizePreferences({
+    days: 5,
+    proteins: ['Chicken'],
+    mealSlots: [{ type: 'Dinner', time: '6:30 PM' }],
+    servingsPerMeal: 2,
+    recipeVarietyMode: 'same',
+    location: '14450'
+  });
+  const plan = buildSavedRecipePlan(preferences);
+  const tacoBake = plan.recipeLibrary.find((recipe) => recipe.name === 'Chicken Taco Bake');
+  const assignments = Array.from({ length: 5 }, (_, index) => ({
+    slotKey: `${index + 1}-Dinner-0`,
+    dayNumber: index + 1,
+    mealType: 'Dinner',
+    time: '6:30 PM',
+    meal: tacoBake
+  }));
+
+  const assigned = attachGroceryEstimate(buildAssignedMealPlan(plan, assignments), preferences);
+  const chicken = assigned.groceryEstimate.lineItems.find((item) => item.name === 'Chicken breasts');
+
+  assert.ok(tacoBake);
+  assert.equal(tacoBake.baseServings, 10);
+  assertAlmostEqual(chicken?.costUnits, 32, '5 days x 2 servings chicken taco bake');
+  assert.match(chicken?.quantityLabel || '', /^1 tray \(.+3-4 breasts; need ~2 lb\)/);
+  assert.ok(chicken.estimatedCost < 13, `expected one chicken tray, got $${chicken.estimatedCost}`);
+});
+
 function assertAlmostEqual(actual, expected, context) {
   assert.ok(Number.isFinite(actual), `${context}: expected a numeric amount`);
   assert.ok(Math.abs(actual - expected) <= 0.11, `${context}: expected ${actual} to be close to ${expected}`);

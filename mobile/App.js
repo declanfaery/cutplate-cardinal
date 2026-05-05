@@ -2869,12 +2869,7 @@ function PantryRecipeResults({ hasIngredients, recipes = [], visibleCount = 3, i
             <CalendarPlus color={COLORS.white} size={18} strokeWidth={2.8} />
             <Text style={styles.addRecipeCalendarText}>Add to my calendar</Text>
           </Pressable>
-          {onSaveRecipe ? (
-            <Pressable onPress={() => onSaveRecipe(recipe)} style={styles.saveRecipeButton}>
-              <Plus color={COLORS.cardinal} size={16} strokeWidth={2.8} />
-              <Text style={styles.saveRecipeButtonText}>Save recipe</Text>
-            </Pressable>
-          ) : null}
+          {onSaveRecipe ? <SaveRecipeButton recipe={recipe} onSaveRecipe={onSaveRecipe} /> : null}
           {openRecipeId === (recipe.id || recipe.name) ? (
             <View style={styles.calendarDayPicker}>
               <Text style={styles.calendarDayPickerTitle}>Pick a day</Text>
@@ -3727,13 +3722,53 @@ function RecipeModule({ meal, plannedServingsForRecipe, onSwap, onSaveRecipe, is
           <Text style={styles.swapButtonText}>Sub out recipe</Text>
         </Pressable>
       ) : null}
-      {onSaveRecipe ? (
-        <Pressable onPress={() => onSaveRecipe(meal)} style={styles.saveRecipeButton}>
-          <Plus color={COLORS.cardinal} size={16} strokeWidth={2.8} />
-          <Text style={styles.saveRecipeButtonText}>Save recipe</Text>
-        </Pressable>
-      ) : null}
+      {onSaveRecipe ? <SaveRecipeButton recipe={meal} onSaveRecipe={onSaveRecipe} /> : null}
     </View>
+  );
+}
+
+function SaveRecipeButton({ recipe, onSaveRecipe }) {
+  const [saved, setSaved] = useState(false);
+  const scale = useRef(new Animated.Value(1)).current;
+  const timeoutRef = useRef(null);
+
+  useEffect(() => () => clearTimeout(timeoutRef.current), []);
+
+  const handleSave = async () => {
+    await onSaveRecipe?.(recipe);
+    setSaved(true);
+    scale.setValue(0.96);
+    Animated.sequence([
+      Animated.timing(scale, {
+        toValue: 1.08,
+        duration: 130,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true
+      }),
+      Animated.spring(scale, {
+        toValue: 1,
+        friction: 4,
+        tension: 120,
+        useNativeDriver: true
+      })
+    ]).start();
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => setSaved(false), 1800);
+  };
+
+  return (
+    <Pressable onPress={handleSave} style={[styles.saveRecipeButton, saved && styles.saveRecipeButtonSaved]}>
+      <Animated.View style={{ transform: [{ scale }] }}>
+        {saved ? (
+          <Check color={COLORS.white} size={17} strokeWidth={3.2} />
+        ) : (
+          <Plus color={COLORS.cardinal} size={16} strokeWidth={2.8} />
+        )}
+      </Animated.View>
+      <Text style={[styles.saveRecipeButtonText, saved && styles.saveRecipeButtonTextSaved]}>
+        {saved ? 'Saved to recipes' : 'Save recipe'}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -5421,10 +5456,17 @@ const styles = StyleSheet.create({
     gap: 7,
     marginTop: 8
   },
+  saveRecipeButtonSaved: {
+    borderColor: COLORS.greenDark,
+    backgroundColor: COLORS.green
+  },
   saveRecipeButtonText: {
     color: COLORS.cardinal,
     fontSize: 14,
     fontWeight: '900'
+  },
+  saveRecipeButtonTextSaved: {
+    color: COLORS.white
   },
   shoppingModule: {
     backgroundColor: COLORS.pale,
