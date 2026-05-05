@@ -96,8 +96,10 @@ const INITIAL_MEAL_SLOTS = [
   { type: 'Snack', time: '3:30 PM', enabled: false }
 ];
 const USER_STORAGE_KEY = 'cutplate:user:v1';
+const ONBOARDING_COMPLETE_STORAGE_KEY = 'cutplate:onboarding-complete:v1';
 const CALENDAR_STORAGE_KEY = 'cutplate:calendar:v1';
 const SHOPPING_LIST_STORAGE_KEY = 'cutplate:shopping-list:v1';
+const SAVED_RECIPES_STORAGE_KEY = 'cutplate:saved-recipes:v1';
 const KEYBOARD_ACCESSORY_ID = 'cutplate-keyboard-done';
 const KEYBOARD_DISMISS_MODE = Platform.OS === 'ios' ? 'interactive' : 'on-drag';
 const TEXT_INPUT_DONE_PROPS = Platform.OS === 'ios' ? { inputAccessoryViewID: KEYBOARD_ACCESSORY_ID } : {};
@@ -119,6 +121,7 @@ const ONBOARDING_SLIDES = [
 export default function App() {
   const [hasBooted, setHasBooted] = useState(false);
   const [viewer, setViewer] = useState(null);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [onboardingIndex, setOnboardingIndex] = useState(0);
   const [signupName, setSignupName] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
@@ -127,6 +130,7 @@ export default function App() {
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [calendarMeals, setCalendarMeals] = useState([]);
   const [latestShoppingPlan, setLatestShoppingPlan] = useState(null);
+  const [savedRecipes, setSavedRecipes] = useState([]);
   const [appMode, setAppMode] = useState('home');
   const [step, setStep] = useState(0);
   const [days, setDays] = useState(5);
@@ -200,16 +204,20 @@ export default function App() {
     let cancelled = false;
 
     const boot = async () => {
-      const [storedViewer, storedCalendarMeals, storedShoppingPlan] = await Promise.all([
+      const [storedViewer, storedOnboardingComplete, storedCalendarMeals, storedShoppingPlan, storedSavedRecipes] = await Promise.all([
         loadStoredJson(USER_STORAGE_KEY, null),
+        loadStoredJson(ONBOARDING_COMPLETE_STORAGE_KEY, false),
         loadStoredJson(CALENDAR_STORAGE_KEY, []),
-        loadStoredJson(SHOPPING_LIST_STORAGE_KEY, null)
+        loadStoredJson(SHOPPING_LIST_STORAGE_KEY, null),
+        loadStoredJson(SAVED_RECIPES_STORAGE_KEY, [])
       ]);
 
       if (cancelled) return;
       setViewer(storedViewer);
+      setHasCompletedOnboarding(Boolean(storedOnboardingComplete || storedViewer));
       setCalendarMeals(Array.isArray(storedCalendarMeals) ? storedCalendarMeals : []);
       setLatestShoppingPlan(storedShoppingPlan && typeof storedShoppingPlan === 'object' ? storedShoppingPlan : null);
+      setSavedRecipes(Array.isArray(storedSavedRecipes) ? storedSavedRecipes : []);
       setSignupName(storedViewer?.name || '');
       setSignupEmail(storedViewer?.email || '');
       setHasBooted(true);
@@ -261,6 +269,23 @@ export default function App() {
     setAppMode('pantry');
   };
 
+  const completeOnboardingAsGuest = async () => {
+    setSignupError('');
+    setSignupNotice('');
+    setHasCompletedOnboarding(true);
+    await saveStoredJson(ONBOARDING_COMPLETE_STORAGE_KEY, true);
+    setAppMode('home');
+  };
+
+  const startProfileSetup = () => {
+    setSignupError('');
+    setSignupNotice('');
+    setSignupName(viewer?.name || '');
+    setSignupEmail(viewer?.email || '');
+    setOnboardingIndex(ONBOARDING_SLIDES.length);
+    setAppMode('profile');
+  };
+
   const submitSignup = async () => {
     const name = signupName.trim();
     const email = signupEmail.trim().toLowerCase();
@@ -301,14 +326,56 @@ export default function App() {
       };
 
       await saveStoredJson(USER_STORAGE_KEY, profile);
+      await saveStoredJson(ONBOARDING_COMPLETE_STORAGE_KEY, true);
       setViewer(profile);
+      setHasCompletedOnboarding(true);
       setSignupNotice(data.emailSent ? 'Confirmation email sent.' : 'Confirmation link created for local testing.');
+      setAppMode('home');
     } catch (requestError) {
       setSignupError(formatApiFailure('Could not send the confirmation email', requestError));
     } finally {
       setIsSigningUp(false);
     }
   };
+
+  const saveRecipeToShelf = async (recipe) => {
+    const savedRecipe = {
+      ...sanitizeCalendarRecipe(recipe),
+      savedAt: new Date().toISOString()
+    };
+    const recipeKey = normalizeRecipeName(`${savedRecipe.mealType}-${savedRecipe.name}`);
+    const nextRecipes = [
+      savedRecipe,
+      ...savedRecipes.filter((item) => normalizeRecipeName(`${item.mealType}-${item.name}`) !== recipeKey)
+    ].slice(0, 60);
+
+    setSavedRecipes(nextRecipes);
+    await saveStoredJson(SAVED_RECIPES_STORAGE_KEY, nextRecipes);
+  };
+
+  const removeSavedRecipe = async (recipe) => {
+    const recipeKey = normalizeRecipeName(`${recipe?.mealType}-${recipe?.name}`);
+    const nextRecipes = savedRecipes.filter((item) => normalizeRecipeName(`${item.mealType}-${item.name}`) !== recipeKey);
+
+    setSavedRecipes(nextRecipes);
+    await saveStoredJson(SAVED_RECIPES_STORAGE_KEY, nextRecipes);
+  };
+
+  const openSavedRecipe = (recipe) => {
+    const storedRecipe = sanitizeCalendarRecipe(recipe);
+    setError('');
+    setActiveCalendarMeal({
+      id: `saved-${storedRecipe.id || normalizeRecipeName(storedRecipe.name)}`,
+      mealType: storedRecipe.mealType,
+      time: storedRecipe.time,
+      name: storedRecipe.name,
+      calories: storedRecipe.macros?.calories || 0,
+      protein: storedRecipe.macros?.protein || 0,
+      recipe: storedRecipe
+    });
+    setAppMode('calendar-recipe');
+  };
+
 
   const handleAddPlanToCalendar = async (calendarPlan) => {
     const meals = buildCalendarMeals(calendarPlan);
@@ -569,10 +636,18 @@ export default function App() {
       // Local deletion still lets the user remove app data from this device.
     }
 
-    await AsyncStorage.multiRemove([USER_STORAGE_KEY, CALENDAR_STORAGE_KEY, SHOPPING_LIST_STORAGE_KEY]);
+    await AsyncStorage.multiRemove([
+      USER_STORAGE_KEY,
+      ONBOARDING_COMPLETE_STORAGE_KEY,
+      CALENDAR_STORAGE_KEY,
+      SHOPPING_LIST_STORAGE_KEY,
+      SAVED_RECIPES_STORAGE_KEY
+    ]);
     setViewer(null);
+    setHasCompletedOnboarding(false);
     setCalendarMeals([]);
     setLatestShoppingPlan(null);
+    setSavedRecipes([]);
     setPlan(null);
     setSelectedMenuPlan(null);
     setSelectedMealIds([]);
@@ -616,6 +691,12 @@ export default function App() {
       return;
     }
     if (appMode === 'shopping') {
+      setAppMode('home');
+      return;
+    }
+    if (appMode === 'profile') {
+      setSignupError('');
+      setSignupNotice('');
       setAppMode('home');
       return;
     }
@@ -1036,7 +1117,7 @@ export default function App() {
     );
   }
 
-  if (!viewer) {
+  if (!hasCompletedOnboarding) {
     const onboardingProgress = Math.min(1, (onboardingIndex + 1) / (ONBOARDING_SLIDES.length + 1));
 
     return (
@@ -1056,6 +1137,7 @@ export default function App() {
             email={signupEmail}
             setEmail={setSignupEmail}
             onSubmit={submitSignup}
+            onSkip={completeOnboardingAsGuest}
             isSubmitting={isSigningUp}
             error={signupError}
             notice={signupNotice}
@@ -1111,6 +1193,7 @@ export default function App() {
                 onRegenerate={generatePlan}
                 onSwapMeal={swapMeal}
                 onAddToCalendar={handleAddPlanToCalendar}
+                onSaveRecipe={saveRecipeToShelf}
                 isLoading={isLoading}
                 isEstimating={isEstimating}
                 error={error}
@@ -1122,11 +1205,15 @@ export default function App() {
             viewer={viewer}
             calendarMeals={calendarMeals}
             latestShoppingPlan={latestShoppingPlan}
+            savedRecipes={savedRecipes}
             onViewShoppingList={viewShoppingList}
             onViewCalendarMeal={openCalendarMeal}
             onClearCalendar={clearSavedCalendar}
+            onViewSavedRecipe={openSavedRecipe}
+            onRemoveSavedRecipe={removeSavedRecipe}
             onStartGuided={startGuidedPlan}
             onStartPantry={startPantryFinder}
+            onCreateProfile={startProfileSetup}
             onDeleteAccount={deleteAccount}
           />
         ) : appMode === 'shopping' ? (
@@ -1152,11 +1239,26 @@ export default function App() {
             onPickPhoto={pickPantryPhoto}
             onTakePhoto={takePantryPhoto}
             onAddRecipeToCalendar={handleAddPantryRecipeToCalendar}
+            onSaveRecipe={saveRecipeToShelf}
             onShowMoreRecipes={showMorePantryRecipes}
             isAnalyzingPhoto={isAnalyzingPantryPhoto}
             isLoading={isPantrySearching}
             error={pantrySearchError}
             note={pantrySearchNote}
+          />
+        ) : appMode === 'profile' ? (
+          <OnboardingScreen
+            slideIndex={ONBOARDING_SLIDES.length}
+            setSlideIndex={setOnboardingIndex}
+            name={signupName}
+            setName={setSignupName}
+            email={signupEmail}
+            setEmail={setSignupEmail}
+            onSubmit={submitSignup}
+            onSkip={completeOnboardingAsGuest}
+            isSubmitting={isSigningUp}
+            error={signupError}
+            notice={signupNotice}
           />
         ) : appMode === 'calendar-recipe' ? (
           <CalendarRecipeScreen meal={activeCalendarMeal} />
@@ -1812,6 +1914,10 @@ function sanitizeCalendarRecipe(recipe = {}) {
     description: recipe.description || '',
     macroRating: recipe.macroRating || 'FIT',
     prepTime: recipe.prepTime || '',
+    baseServings: Number(recipe.baseServings || recipe.ingredientServings || 0),
+    ingredientServings: Number(recipe.ingredientServings || recipe.baseServings || 0),
+    ingredientScale: recipe.ingredientScale || '',
+    ingredientsAreFullBatch: Boolean(recipe.ingredientsAreFullBatch),
     macros: {
       calories: Number(recipe.macros?.calories || recipe.calories || 0),
       protein: Number(recipe.macros?.protein || recipe.proteinGrams || 0),
@@ -2058,6 +2164,7 @@ function OnboardingScreen({
   email,
   setEmail,
   onSubmit,
+  onSkip,
   isSubmitting,
   error,
   notice
@@ -2074,10 +2181,10 @@ function OnboardingScreen({
     >
       <View style={styles.onboardingHero}>
         <CardinalMascot active compact />
-        <Text style={styles.homeTitle}>{isSignup ? 'Create your account.' : slide.title}</Text>
+        <Text style={styles.homeTitle}>{isSignup ? 'Create your profile.' : slide.title}</Text>
         <Text style={styles.homeSubtitle}>
           {isSignup
-            ? 'Enter your name and email. We will send a confirmation email before this goes live in the store.'
+            ? 'Optional: add your name and email to save preferences and favorite recipes. You can use recipes without an account.'
             : slide.body}
         </Text>
       </View>
@@ -2093,7 +2200,10 @@ function OnboardingScreen({
             ))}
           </View>
           <Pressable onPress={() => setSlideIndex((current) => current + 1)} style={styles.homePlanButton}>
-            <Text style={styles.homePlanButtonText}>{slideIndex === ONBOARDING_SLIDES.length - 1 ? 'Set up account' : 'Continue'}</Text>
+            <Text style={styles.homePlanButtonText}>{slideIndex === ONBOARDING_SLIDES.length - 1 ? 'Continue' : 'Continue'}</Text>
+          </Pressable>
+          <Pressable onPress={onSkip} style={styles.guestButton}>
+            <Text style={styles.guestButtonText}>Skip and start cooking</Text>
           </Pressable>
         </>
       ) : (
@@ -2129,9 +2239,12 @@ function OnboardingScreen({
           </Field>
           {notice ? <Text style={styles.successText}>{notice}</Text> : null}
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
-          <Pressable onPress={onSubmit} disabled={isSubmitting} style={[styles.homePlanButton, isSubmitting && styles.continueDisabled]}>
+          <Pressable onPress={onSkip} style={styles.homePlanButton}>
+            <Text style={styles.homePlanButtonText}>Continue as guest</Text>
+          </Pressable>
+          <Pressable onPress={onSubmit} disabled={isSubmitting} style={[styles.profileSubmitButton, isSubmitting && styles.continueDisabled]}>
             {isSubmitting ? <ActivityIndicator color={COLORS.white} /> : null}
-            <Text style={styles.homePlanButtonText}>{isSubmitting ? 'Sending' : 'Send confirmation email'}</Text>
+            <Text style={styles.profileSubmitButtonText}>{isSubmitting ? 'Sending' : 'Create profile'}</Text>
           </Pressable>
         </View>
       )}
@@ -2143,11 +2256,15 @@ function HomeScreen({
   viewer,
   calendarMeals,
   latestShoppingPlan,
+  savedRecipes,
   onViewShoppingList,
   onViewCalendarMeal,
   onClearCalendar,
+  onViewSavedRecipe,
+  onRemoveSavedRecipe,
   onStartGuided,
   onStartPantry,
+  onCreateProfile,
   onDeleteAccount
 }) {
   const [deleteArmed, setDeleteArmed] = useState(false);
@@ -2197,14 +2314,27 @@ function HomeScreen({
         onClearCalendar={onClearCalendar}
       />
 
-      <Pressable
-        onPress={() => (deleteArmed ? onDeleteAccount?.() : setDeleteArmed(true))}
-        style={styles.deleteAccountButton}
-      >
-        <Text style={styles.deleteAccountText}>
-          {deleteArmed ? 'Tap again to delete account' : 'Delete account'}
-        </Text>
-      </Pressable>
+      <SavedRecipeShelf
+        recipes={savedRecipes}
+        onViewRecipe={onViewSavedRecipe}
+        onRemoveRecipe={onRemoveSavedRecipe}
+      />
+
+      {viewer ? (
+        <Pressable
+          onPress={() => (deleteArmed ? onDeleteAccount?.() : setDeleteArmed(true))}
+          style={styles.deleteAccountButton}
+        >
+          <Text style={styles.deleteAccountText}>
+            {deleteArmed ? 'Tap again to delete account' : 'Delete account'}
+          </Text>
+        </Pressable>
+      ) : (
+        <Pressable onPress={onCreateProfile} style={styles.profilePrompt}>
+          <Text style={styles.profilePromptTitle}>Create optional profile</Text>
+          <Text style={styles.profilePromptText}>Save your name, email, favorite recipes, and meal preferences when you are ready.</Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }
@@ -2292,6 +2422,47 @@ function HomeCalendar({ meals = [], latestShoppingPlan, onViewShoppingList, onVi
           {clearArmed ? 'Tap again to clear calendar' : 'Clear calendar'}
         </Text>
       </Pressable>
+    </View>
+  );
+}
+
+function SavedRecipeShelf({ recipes = [], onViewRecipe, onRemoveRecipe }) {
+  const visibleRecipes = recipes.slice(0, 8);
+
+  return (
+    <View style={styles.savedRecipeShelf}>
+      <Text style={styles.cachedHomeTitle}>Saved recipes</Text>
+      {visibleRecipes.length ? (
+        visibleRecipes.map((recipe) => (
+          <Pressable
+            key={`${recipe.mealType}-${recipe.name}`}
+            onPress={() => onViewRecipe?.(recipe)}
+            accessibilityRole="button"
+            accessibilityLabel={`Open saved recipe ${recipe.name}`}
+            style={styles.savedRecipeItem}
+          >
+            <View style={styles.savedRecipeText}>
+              <Text style={styles.savedRecipeName}>{recipe.name}</Text>
+              <Text style={styles.savedRecipeMeta}>
+                {recipe.mealType || 'Meal'} - {recipe.macros?.calories || 0} cals, {recipe.macros?.protein || 0}g protein
+              </Text>
+            </View>
+            <Pressable
+              onPress={(event) => {
+                event?.stopPropagation?.();
+                onRemoveRecipe?.(recipe);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove saved recipe ${recipe.name}`}
+              style={styles.savedRecipeRemove}
+            >
+              <Trash2 color={COLORS.cardinal} size={16} strokeWidth={2.8} />
+            </Pressable>
+          </Pressable>
+        ))
+      ) : (
+        <Text style={styles.cachedEmpty}>Tap Save recipe on any meal you want to keep here.</Text>
+      )}
     </View>
   );
 }
@@ -2475,6 +2646,7 @@ function PantryFinderScreen({
   onPickPhoto,
   onTakePhoto,
   onAddRecipeToCalendar,
+  onSaveRecipe,
   onShowMoreRecipes,
   isAnalyzingPhoto,
   isLoading,
@@ -2547,6 +2719,7 @@ function PantryFinderScreen({
           isLoading={isLoading}
           onShowMore={onShowMoreRecipes}
           onAddToCalendar={onAddRecipeToCalendar}
+          onSaveRecipe={onSaveRecipe}
         />
       ) : null}
     </ScrollView>
@@ -2628,7 +2801,7 @@ function PantryConfirmStep({
   );
 }
 
-function PantryRecipeResults({ hasIngredients, recipes = [], visibleCount = 3, isLoading, onShowMore, onAddToCalendar }) {
+function PantryRecipeResults({ hasIngredients, recipes = [], visibleCount = 3, isLoading, onShowMore, onAddToCalendar, onSaveRecipe }) {
   const [openRecipeId, setOpenRecipeId] = useState('');
   const calendarDates = useMemo(() => getScheduledDates(7, false), []);
   const visibleRecipes = recipes.slice(0, Math.max(3, visibleCount));
@@ -2696,6 +2869,12 @@ function PantryRecipeResults({ hasIngredients, recipes = [], visibleCount = 3, i
             <CalendarPlus color={COLORS.white} size={18} strokeWidth={2.8} />
             <Text style={styles.addRecipeCalendarText}>Add to my calendar</Text>
           </Pressable>
+          {onSaveRecipe ? (
+            <Pressable onPress={() => onSaveRecipe(recipe)} style={styles.saveRecipeButton}>
+              <Plus color={COLORS.cardinal} size={16} strokeWidth={2.8} />
+              <Text style={styles.saveRecipeButtonText}>Save recipe</Text>
+            </Pressable>
+          ) : null}
           {openRecipeId === (recipe.id || recipe.name) ? (
             <View style={styles.calendarDayPicker}>
               <Text style={styles.calendarDayPickerTitle}>Pick a day</Text>
@@ -3337,6 +3516,7 @@ function ResultScreen({
   onRegenerate,
   onSwapMeal,
   onAddToCalendar,
+  onSaveRecipe,
   isLoading,
   isEstimating,
   error
@@ -3421,6 +3601,7 @@ function ResultScreen({
               meal={meal}
               plannedServingsForRecipe={plannedServingsByRecipe[getMealRepeatKey(meal)] || servingsEach}
               onSwap={() => onSwapMeal?.(activeDay.dayNumber, meal.id)}
+              onSaveRecipe={onSaveRecipe}
               isSwapping={isEstimating}
             />
           ))}
@@ -3493,7 +3674,7 @@ function Metric({ label, value }) {
   );
 }
 
-function RecipeModule({ meal, plannedServingsForRecipe, onSwap, isSwapping }) {
+function RecipeModule({ meal, plannedServingsForRecipe, onSwap, onSaveRecipe, isSwapping }) {
   const baseServings = Number(meal.baseServings || meal.ingredientServings || 0);
   const isBatchRecipe = meal.ingredientScale === 'batch' || meal.ingredientsAreFullBatch;
 
@@ -3544,6 +3725,12 @@ function RecipeModule({ meal, plannedServingsForRecipe, onSwap, isSwapping }) {
         <Pressable onPress={onSwap} disabled={isSwapping} style={styles.swapButton}>
           {isSwapping ? <ActivityIndicator color={COLORS.cardinal} /> : <RefreshCw color={COLORS.cardinal} size={16} />}
           <Text style={styles.swapButtonText}>Sub out recipe</Text>
+        </Pressable>
+      ) : null}
+      {onSaveRecipe ? (
+        <Pressable onPress={() => onSaveRecipe(meal)} style={styles.saveRecipeButton}>
+          <Plus color={COLORS.cardinal} size={16} strokeWidth={2.8} />
+          <Text style={styles.saveRecipeButtonText}>Save recipe</Text>
         </Pressable>
       ) : null}
     </View>
@@ -3817,6 +4004,34 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900'
   },
+  guestButton: {
+    minHeight: 50,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10
+  },
+  guestButtonText: {
+    color: COLORS.cardinal,
+    fontSize: 16,
+    fontWeight: '900'
+  },
+  profileSubmitButton: {
+    minHeight: 54,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#ffd5dc',
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 10
+  },
+  profileSubmitButtonText: {
+    color: COLORS.cardinal,
+    fontSize: 17,
+    fontWeight: '900'
+  },
   homeCalendar: {
     backgroundColor: COLORS.pale2,
     borderRadius: 20,
@@ -3919,6 +4134,67 @@ const styles = StyleSheet.create({
     color: COLORS.cardinal,
     fontSize: 14,
     fontWeight: '900'
+  },
+  savedRecipeShelf: {
+    backgroundColor: COLORS.pale2,
+    borderRadius: 20,
+    padding: 16,
+    gap: 10,
+    marginTop: 16
+  },
+  savedRecipeItem: {
+    minHeight: 66,
+    borderRadius: 16,
+    backgroundColor: COLORS.white,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  savedRecipeText: {
+    flex: 1
+  },
+  savedRecipeName: {
+    color: COLORS.ink,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '900'
+  },
+  savedRecipeMeta: {
+    color: COLORS.muted,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+    marginTop: 2
+  },
+  savedRecipeRemove: {
+    width: 38,
+    height: 38,
+    borderRadius: 999,
+    backgroundColor: '#fff2f4',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  profilePrompt: {
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#ffd5dc',
+    backgroundColor: COLORS.white,
+    padding: 15,
+    gap: 4,
+    marginTop: 16
+  },
+  profilePromptTitle: {
+    color: COLORS.cardinal,
+    fontSize: 16,
+    fontWeight: '900'
+  },
+  profilePromptText: {
+    color: COLORS.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '700'
   },
   deleteAccountButton: {
     alignSelf: 'center',
@@ -5129,6 +5405,23 @@ const styles = StyleSheet.create({
     marginTop: 2
   },
   swapButtonText: {
+    color: COLORS.cardinal,
+    fontSize: 14,
+    fontWeight: '900'
+  },
+  saveRecipeButton: {
+    minHeight: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#ffd8dd',
+    backgroundColor: '#fff7f8',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 8
+  },
+  saveRecipeButtonText: {
     color: COLORS.cardinal,
     fontSize: 14,
     fontWeight: '900'
