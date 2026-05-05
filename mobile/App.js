@@ -1566,6 +1566,24 @@ function buildAssignmentsFromPlan(plan) {
   );
 }
 
+function getPlannedServingsByRecipe(plan = {}) {
+  const servingsEach = Math.max(1, Number(plan.preferences?.servingsPerMeal || 1));
+  const counts = {};
+
+  for (const day of plan.days || []) {
+    for (const meal of day.meals || []) {
+      const key = getMealRepeatKey(meal);
+      counts[key] = (counts[key] || 0) + servingsEach;
+    }
+  }
+
+  return counts;
+}
+
+function getMealRepeatKey(meal = {}) {
+  return meal.optionKey || `${meal.mealType || ''}-${meal.name || ''}-${meal.sourceFolder || ''}`;
+}
+
 function getBestMealIndexForSlot(pool, dayProteins) {
   let bestIndex = 0;
   let bestScore = Number.POSITIVE_INFINITY;
@@ -3326,6 +3344,9 @@ function ResultScreen({
   const groceryEstimate = plan.groceryEstimate;
   const scheduledDates = getScheduledDates(plan.days.length, Boolean(plan.preferences?.weekdaysOnly));
   const activeDate = scheduledDates[selectedDay];
+  const servingsEach = Math.max(1, Number(plan.preferences?.servingsPerMeal || 2));
+  const totalPlannedServings = Number(plan.summary?.totalMeals || 0) * servingsEach;
+  const plannedServingsByRecipe = getPlannedServingsByRecipe(plan);
 
   return (
     <ScrollView
@@ -3343,7 +3364,7 @@ function ResultScreen({
         </View>
         <Text style={styles.resultTitle}>Your plan is ready.</Text>
         <Text style={styles.resultSubtitle}>
-          {plan.summary.totalMeals} meals, {plan.preferences?.servingsPerMeal || 2} servings each.
+          {plan.summary.totalMeals} meals, {servingsEach} servings each ({totalPlannedServings} total servings).
         </Text>
       </View>
 
@@ -3398,6 +3419,7 @@ function ResultScreen({
             <RecipeModule
               key={meal.id}
               meal={meal}
+              plannedServingsForRecipe={plannedServingsByRecipe[getMealRepeatKey(meal)] || servingsEach}
               onSwap={() => onSwapMeal?.(activeDay.dayNumber, meal.id)}
               isSwapping={isEstimating}
             />
@@ -3471,7 +3493,10 @@ function Metric({ label, value }) {
   );
 }
 
-function RecipeModule({ meal, onSwap, isSwapping }) {
+function RecipeModule({ meal, plannedServingsForRecipe, onSwap, isSwapping }) {
+  const baseServings = Number(meal.baseServings || meal.ingredientServings || 0);
+  const isBatchRecipe = meal.ingredientScale === 'batch' || meal.ingredientsAreFullBatch;
+
   return (
     <View style={styles.recipeModule}>
       <View style={styles.recipeTop}>
@@ -3490,6 +3515,11 @@ function RecipeModule({ meal, onSwap, isSwapping }) {
         <Macro label="C" value={`${meal.macros.carbs}g`} />
         <Macro label="F" value={`${meal.macros.fat}g`} />
       </View>
+      {isBatchRecipe && baseServings > 0 ? (
+        <Text style={styles.recipeBatchNote}>
+          Makes {baseServings} servings. This plan uses {plannedServingsForRecipe || baseServings} servings, and the shopping list scales from your selected days and servings.
+        </Text>
+      ) : null}
       <Text style={styles.moduleTitle}>Ingredients</Text>
       {(meal.ingredients || []).map((ingredient) => (
         <Text key={ingredient} style={styles.recipeText}>
@@ -5019,6 +5049,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 23,
     fontWeight: '600'
+  },
+  recipeBatchNote: {
+    color: COLORS.cardinalDark,
+    backgroundColor: '#fff5d8',
+    borderColor: '#f1d979',
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '800'
   },
   macroRow: {
     flexDirection: 'row',
