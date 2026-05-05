@@ -15,32 +15,36 @@ export const SAVED_RECIPES = [
     description: 'Freezer-friendly buffalo chicken pockets with a high-protein dough and creamy buffalo filling.',
     macroRating: 'SUPER FIT',
     prepTime: '45 minutes',
-    baseServings: 8,
+    baseServings: 10,
     macros: { calories: 425, protein: 50, carbs: 44, fat: 4 },
     ingredients: [
       '500 g self-rising flour',
-      '500 g plain nonfat Greek yogurt, plus 20 g more if the dough is dry',
+      '520 g plain nonfat Greek yogurt',
       '1 tbsp garlic salt',
       '1 tbsp Italian seasoning',
       '40 oz chicken breast',
+      '1/2 tbsp garlic salt',
       '1/2 tbsp smoked paprika',
       '2 tbsp ranch seasoning',
       '1/2 tbsp black pepper',
       '4 tbsp tomato salsa',
       '1 cup diced white onion',
-      '1/2 cup buffalo sauce',
+      '1/2 cup buffalo sauce for filling',
       '3 1/2 cups fat-free mozzarella',
       '10 g fresh chives',
       '1 1/2 cups low-fat cottage cheese',
       '2 oz 1/3-fat cream cheese',
+      '1/2 tbsp garlic salt',
+      '1/2 tbsp black pepper',
       '1/2 tbsp onion powder',
+      '1/2 cup buffalo sauce for sauce',
       '1/4 cup fat-free milk'
     ],
     steps: [
-      'Mix the flour, Greek yogurt, garlic salt, and Italian seasoning until a soft dough forms. Add the extra 20 g yogurt only if the dough needs it.',
+      'Mix the flour, Greek yogurt, garlic salt, and Italian seasoning until a soft dough forms.',
       'Cook and shred the chicken breast, then season it with smoked paprika, ranch seasoning, black pepper, salsa, onion, buffalo sauce, mozzarella, and chives.',
       'Blend cottage cheese, cream cheese, garlic salt, black pepper, onion powder, buffalo sauce, and fat-free milk into a smooth high-protein buffalo sauce.',
-      'Divide the dough into 8 portions, flatten each piece, fill with buffalo chicken, and seal tightly.',
+      'Divide the dough into 10 portions, flatten each piece, fill with buffalo chicken, and seal tightly.',
       'Air fry at 375 F for 8-10 minutes, or bake at 400 F for 14-18 minutes, until browned and cooked through.',
       'Freeze wrapped portions for up to 1 month. Reheat from frozen by microwaving 3-4 minutes in a damp paper towel, then air fry or pan-toast until crisp.'
     ]
@@ -580,7 +584,8 @@ function toPlanRecipe(recipe, mealType) {
       }
     ],
     sourceFolder: recipe.sourceFolder,
-    savedRecipe: true
+    savedRecipe: true,
+    ingredientScale: 'batch'
   };
 }
 

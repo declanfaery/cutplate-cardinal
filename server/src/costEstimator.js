@@ -26,6 +26,7 @@ const PRICE_RULES = [
   { pattern: /self[-\s]?rising flour|flour/i, label: 'Flour and baking mix', unit: 'cup', price: 4.99 / 18, measure: 'cup', ouncesPerUnit: 4.4, defaultCups: 1, gramsPerCup: 125, storePackage: fixedPackage(18, 4.99, 'bag', 'bags', '5 lb') },
   { pattern: /greek yogurt sauce/i, label: 'Greek yogurt sauce', unit: 'tbsp', price: 5.49 / 32, measure: 'spoon', storePackage: fixedPackage(32, 5.49, 'tub', 'tubs', '16 oz') },
   { pattern: /greek yogurt/i, label: 'Greek yogurt', unit: 'cup', price: 5.49 / 4, measure: 'cup', ouncesPerUnit: 8, defaultCups: 0.5, gramsPerCup: 245, storePackage: fixedPackage(4, 5.49, 'tub', 'tubs', '32 oz') },
+  { pattern: /fat[-\s]?free milk|almond milk|milk/i, label: 'Milk', unit: 'cup', price: 2.99 / 16, measure: 'cup', ouncesPerUnit: 8, defaultCups: 0.25, storePackage: fixedPackage(16, 2.99, 'carton', 'cartons', '1/2 gal') },
   { pattern: /cottage cheese/i, label: 'Cottage cheese', unit: 'cup', price: 3.29 / 2, measure: 'cup', ouncesPerUnit: 8, defaultCups: 0.5, storePackage: fixedPackage(2, 3.29, 'tub', 'tubs', '16 oz') },
   { pattern: /sweet potato/i, label: 'Sweet potatoes', unit: 'cup', price: 1.49 / 2.9, measure: 'cup', ouncesPerUnit: 5.5, defaultCups: 0.5, storePackage: fixedPackage(2.9, 1.49, 'lb', 'lb', '~1 lb') },
   { pattern: /broccoli/i, label: 'Broccoli', unit: 'cup', price: 2.49 / 3, measure: 'cup', ouncesPerUnit: 3, defaultCups: 1, storePackage: fixedPackage(3, 2.49, 'crown', 'crowns', '~3 cups') },
@@ -38,10 +39,11 @@ const PRICE_RULES = [
   { pattern: /tomato/i, label: 'Tomatoes', unit: 'cup', price: 2.99 / 3.2, measure: 'cup', ouncesPerUnit: 5, defaultCups: 0.5, storePackage: fixedPackage(3.2, 2.99, 'lb', 'lb', '~1 lb') },
   { pattern: /black beans|beans/i, label: 'Beans', unit: 'cup', price: 1.39 / 1.5, measure: 'cup', ouncesPerUnit: 6, defaultCups: 0.5, storePackage: fixedPackage(1.5, 1.39, 'can', 'cans', '15 oz') },
   { pattern: /corn/i, label: 'Corn', unit: 'cup', price: 1.19 / 1.75, measure: 'cup', ouncesPerUnit: 5, defaultCups: 0.33, storePackage: fixedPackage(1.75, 1.19, 'can', 'cans', '15 oz') },
-  { pattern: /cheese/i, label: 'Reduced-fat cheese', unit: 'cup', price: 3.49 / 2, measure: 'cup', ouncesPerUnit: 4, defaultCups: 0.06, gramsPerCup: 112, storePackage: fixedPackage(2, 3.49, 'bag', 'bags', '8 oz') },
+  { pattern: /mozzarella|cheese/i, label: 'Reduced-fat cheese', unit: 'cup', price: 3.49 / 2, measure: 'cup', ouncesPerUnit: 4, defaultCups: 0.06, gramsPerCup: 112, storePackage: fixedPackage(2, 3.49, 'bag', 'bags', '8 oz') },
   { pattern: /zucchini|green beans|asparagus/i, label: 'Green vegetables', unit: 'cup', price: 3.49 / 4, measure: 'cup', ouncesPerUnit: 4, defaultCups: 1, storePackage: fixedPackage(4, 3.49, 'bag', 'bags', '1 lb') },
   { pattern: /cauliflower rice/i, label: 'Cauliflower rice', unit: 'cup', price: 2.49 / 3, measure: 'cup', ouncesPerUnit: 4, defaultCups: 1, storePackage: fixedPackage(3, 2.49, 'bag', 'bags', '12 oz') },
-  { pattern: /mixed vegetables|peppers|onions/i, label: 'Mixed vegetables', unit: 'cup', price: 1.49 / 4, measure: 'cup', ouncesPerUnit: 4, defaultCups: 1, storePackage: fixedPackage(4, 1.49, 'bag', 'bags', '1 lb') },
+  { pattern: /white onion|yellow onion|red onion|diced onion/i, label: 'Onions', unit: 'cup', price: 0.99 / 2, measure: 'cup', ouncesPerUnit: 5, defaultCups: 0.5, storePackage: fixedPackage(2, 0.99, 'onion', 'onions', '~1 onion') },
+  { pattern: /mixed vegetables|bell peppers?|sliced peppers|diced peppers|\bpeppers\b/i, label: 'Mixed vegetables', unit: 'cup', price: 1.49 / 4, measure: 'cup', ouncesPerUnit: 4, defaultCups: 1, storePackage: fixedPackage(4, 1.49, 'bag', 'bags', '1 lb') },
   { pattern: /rice|farro|quinoa|pasta|potatoes|potato/i, label: 'Rice, pasta, grains, or potatoes', unit: 'cup', price: 2.29 / 6, measure: 'cup', ouncesPerUnit: 5.5, defaultCups: 0.5, storePackage: fixedPackage(6, 2.29, 'package', 'packages', '1 lb dry') },
   { pattern: /berries|apple|fruit/i, label: 'Fruit', unit: 'cup', price: 4.49 / 3, measure: 'cup', ouncesPerUnit: 5, defaultCups: 1, storePackage: fixedPackage(3, 4.49, 'pack', 'packs', '~1 lb') },
   { pattern: /lime juice/i, label: 'Limes', unit: 'tbsp', price: 0.69 / 2, measure: 'spoon', storePackage: fixedPackage(2, 0.69, 'lime', 'limes', '~2 tbsp juice') },
@@ -49,16 +51,19 @@ const PRICE_RULES = [
   { pattern: /hot sauce/i, label: 'Hot sauce', unit: 'tbsp', price: 3.49 / 32, measure: 'spoon', storePackage: fixedPackage(32, 3.49, 'bottle', 'bottles', '16 oz') },
   { pattern: /teriyaki/i, label: 'Teriyaki sauce', unit: 'tbsp', price: 3.99 / 32, measure: 'spoon', storePackage: fixedPackage(32, 3.99, 'bottle', 'bottles', '16 oz') },
   { pattern: /buffalo/i, label: 'Buffalo sauce', unit: 'tbsp', price: 3.49 / 32, measure: 'spoon', storePackage: fixedPackage(32, 3.49, 'bottle', 'bottles', '16 oz') },
+  { pattern: /ranch seasoning/i, label: 'Ranch seasoning', unit: 'tsp', price: 0.89 / 6, measure: 'spoon', storePackage: fixedPackage(6, 0.89, 'packet', 'packets', '1 oz') },
   { pattern: /ranch|dressing/i, label: 'Light dressing', unit: 'tbsp', price: 3.99 / 32, measure: 'spoon', storePackage: fixedPackage(32, 3.99, 'bottle', 'bottles', '16 oz') },
   { pattern: /pesto/i, label: 'Light pesto', unit: 'tbsp', price: 4.49 / 12, measure: 'spoon', storePackage: fixedPackage(12, 4.49, 'jar', 'jars', '6 oz') },
   { pattern: /dip|syrup|light sauce/i, label: 'Light sauce or dip', unit: 'tbsp', price: 3.49 / 32, measure: 'spoon', storePackage: fixedPackage(32, 3.49, 'bottle', 'bottles', '16 oz') },
   { pattern: /chili powder/i, label: 'Chili powder', unit: 'tsp', price: 2.49 / 60, measure: 'spoon', storePackage: fixedPackage(60, 2.49, 'jar', 'jars', '~3 oz') },
   { pattern: /smoked paprika|paprika/i, label: 'Paprika', unit: 'tsp', price: 2.99 / 60, measure: 'spoon', storePackage: fixedPackage(60, 2.99, 'jar', 'jars', '~3 oz') },
+  { pattern: /garlic salt/i, label: 'Garlic salt', unit: 'tsp', price: 2.49 / 60, measure: 'spoon', storePackage: fixedPackage(60, 2.49, 'jar', 'jars', '~3 oz') },
   { pattern: /garlic powder/i, label: 'Garlic powder', unit: 'tsp', price: 2.49 / 70, measure: 'spoon', storePackage: fixedPackage(70, 2.49, 'jar', 'jars', '~3 oz') },
   { pattern: /onion powder/i, label: 'Onion powder', unit: 'tsp', price: 2.49 / 70, measure: 'spoon', storePackage: fixedPackage(70, 2.49, 'jar', 'jars', '~3 oz') },
   { pattern: /red pepper flakes/i, label: 'Red pepper flakes', unit: 'tsp', price: 2.99 / 60, measure: 'spoon', storePackage: fixedPackage(60, 2.99, 'jar', 'jars', '~2.5 oz') },
   { pattern: /italian seasoning/i, label: 'Italian seasoning', unit: 'tsp', price: 2.99 / 60, measure: 'spoon', storePackage: fixedPackage(60, 2.99, 'jar', 'jars', '~1 oz') },
   { pattern: /everything seasoning/i, label: 'Everything seasoning', unit: 'tsp', price: 3.49 / 60, measure: 'spoon', storePackage: fixedPackage(60, 3.49, 'jar', 'jars', '~3 oz') },
+  { pattern: /fresh chives|chives/i, label: 'Fresh chives', unit: 'g', price: 1.49 / 10, measure: 'gram', defaultGrams: 10, storePackage: fixedPackage(10, 1.49, 'bunch', 'bunches', '~10 g') },
   { pattern: /dried parsley|parsley/i, label: 'Dried parsley', unit: 'tsp', price: 2.49 / 45, measure: 'spoon', storePackage: fixedPackage(45, 2.49, 'jar', 'jars', '~0.5 oz') },
   { pattern: /taco seasoning/i, label: 'Taco seasoning', unit: 'tsp', price: 0.89 / 6, measure: 'spoon', storePackage: fixedPackage(6, 0.89, 'packet', 'packets', '1 oz') },
   { pattern: /cinnamon/i, label: 'Cinnamon', unit: 'tsp', price: 2.49 / 70, measure: 'spoon', storePackage: fixedPackage(70, 2.49, 'jar', 'jars', '~2.5 oz') },
@@ -294,6 +299,9 @@ function collectPricedItems(plan, servings) {
 
   for (const day of plan.days || []) {
     for (const meal of day.meals || []) {
+      const ingredientServings = getIngredientServingsForMeal(meal, servings);
+      const scaleExplicitAmounts = isBatchScaledMeal(meal);
+
       for (const ingredient of meal.ingredients || []) {
         for (const pricedIngredient of expandIngredientForPricing(ingredient)) {
           const rule = findPriceRule(pricedIngredient);
@@ -310,7 +318,7 @@ function collectPricedItems(plan, servings) {
             ounces: 0,
             costUnits: 0
           };
-          const measurement = measureIngredient(pricedIngredient, rule, servings);
+          const measurement = measureIngredient(pricedIngredient, rule, ingredientServings, { scaleExplicitAmounts });
 
           current.quantity += measurement.quantity;
           current.ounces += measurement.ounces;
@@ -322,6 +330,20 @@ function collectPricedItems(plan, servings) {
   }
 
   return items;
+}
+
+function getIngredientServingsForMeal(meal = {}, servingsPerMeal = 1) {
+  const servings = Number(servingsPerMeal || 1);
+  if (isBatchScaledMeal(meal)) {
+    const baseServings = Number(meal.baseServings || meal.ingredientServings || 1);
+    return baseServings > 0 ? servings / baseServings : servings;
+  }
+
+  return servings;
+}
+
+function isBatchScaledMeal(meal = {}) {
+  return meal.ingredientScale === 'batch' || meal.ingredientsAreFullBatch;
 }
 
 function buildLineItems(items, multiplier) {
@@ -365,7 +387,9 @@ function expandIngredientForPricing(ingredient = '') {
   if (/lemon/.test(lower) && !/lemon juice/.test(lower)) expanded.push('1 tbsp lemon juice');
   if (/chili/.test(lower) && !/chili powder/.test(lower)) expanded.push('1/2 tsp chili powder');
   if (/smoked paprika|paprika/.test(lower) && !/^\d/.test(lower)) expanded.push('1/2 tsp paprika');
-  if (/garlic/.test(lower) && !/garlic powder/.test(lower)) expanded.push('1/2 tsp garlic powder');
+  if (/garlic/.test(lower) && !/garlic powder|garlic salt|minced garlic|cloves? garlic/.test(lower) && !/^\d/.test(lower)) {
+    expanded.push('1/2 tsp garlic powder');
+  }
   if (/onion powder/.test(lower) && !/^\d/.test(lower)) expanded.push('1/2 tsp onion powder');
   if (/red pepper/.test(lower) && !/^\d/.test(lower)) expanded.push('1/4 tsp red pepper flakes');
   if (/black pepper|pepper/.test(lower) && !/^\d/.test(lower)) expanded.push('1/4 tsp black pepper');
@@ -378,13 +402,14 @@ function expandIngredientForPricing(ingredient = '') {
   return expanded.length ? expanded : [text];
 }
 
-function measureIngredient(ingredient, rule, servings) {
+function measureIngredient(ingredient, rule, servings, options = {}) {
   const parsed = parseIngredientAmount(ingredient);
   const amount = parsed.amount || 1;
+  const explicitScale = options.scaleExplicitAmounts ? servings : 1;
 
   if (rule.measure === 'servingEach') {
     if (parsed.unit === 'oz' || parsed.unit === 'lb') {
-      const ounces = parsed.unit === 'lb' ? amount * 16 : amount;
+      const ounces = (parsed.unit === 'lb' ? amount * 16 : amount) * explicitScale;
       const quantity = ounces / Number(rule.ouncesPerUnit || 1);
       return {
         quantity,
@@ -403,7 +428,7 @@ function measureIngredient(ingredient, rule, servings) {
 
   if (rule.measure === 'servingOunces') {
     if (parsed.unit === 'oz' || parsed.unit === 'lb' || parsed.unit === 'g') {
-      const quantity = parsed.unit === 'lb' ? amount * 16 : parsed.unit === 'g' ? amount / 28.35 : amount;
+      const quantity = (parsed.unit === 'lb' ? amount * 16 : parsed.unit === 'g' ? amount / 28.35 : amount) * explicitScale;
       return {
         quantity,
         ounces: quantity,
@@ -437,6 +462,15 @@ function measureIngredient(ingredient, rule, servings) {
     };
   }
 
+  if (rule.measure === 'gram') {
+    const quantity = convertToGrams(amount, parsed.unit, rule.defaultGrams || 1) * servings;
+    return {
+      quantity,
+      ounces: quantity / 28.35,
+      costUnits: quantity
+    };
+  }
+
   if (rule.measure === 'each') {
     const quantity = amount * servings;
     return {
@@ -460,6 +494,13 @@ function measureIngredient(ingredient, rule, servings) {
     ounces: 0,
     costUnits: quantity
   };
+}
+
+function convertToGrams(amount, unit, defaultGrams = 1) {
+  if (unit === 'g') return amount;
+  if (unit === 'oz') return amount * 28.35;
+  if (unit === 'lb') return amount * 453.6;
+  return amount * defaultGrams;
 }
 
 function parseIngredientAmount(ingredient = '') {
@@ -584,6 +625,10 @@ function formatQuantityLabel(item) {
     return `${rounded} ${item.unit}`;
   }
 
+  if (item.unit === 'g') {
+    return `${rounded} g`;
+  }
+
   if (item.unit === 'use') {
     return `${rounded} recipe ${pluralize('use', quantity)}`;
   }
@@ -602,6 +647,7 @@ function formatNeededAmount(item) {
 
   if (unit === 'cup') return `${formatNumber(value)} ${pluralize('cup', value)}`;
   if (unit === 'tbsp' || unit === 'tsp') return `${formatNumber(value)} ${unit}`;
+  if (unit === 'g') return `${formatNumber(value)} g`;
   if (unit === 'portion') return `${formatNumber(value)} ${pluralize('portion', value)}`;
   if (unit === 'each') return `${formatNumber(value)} ${pluralize('item', value)}`;
 

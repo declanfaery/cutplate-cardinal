@@ -18,7 +18,9 @@ test('saved repeat recipe library includes proofread measured recipe ingredients
 
   assert.ok(hotPocket);
   assert.ok(koreanChicken);
-  assert.ok(hotPocket.ingredients.includes('500 g plain nonfat Greek yogurt, plus 20 g more if the dough is dry'));
+  assert.equal(hotPocket.baseServings, 10);
+  assert.equal(hotPocket.ingredientScale, 'batch');
+  assert.ok(hotPocket.ingredients.includes('520 g plain nonfat Greek yogurt'));
   assert.ok(koreanChicken.ingredients.includes('1 tbsp honey'));
   assert.ok(koreanChicken.ingredients.includes('2 tsp minced garlic'));
   assert.ok(koreanChicken.ingredients.includes('1 tbsp grated ginger'));
@@ -27,7 +29,7 @@ test('saved repeat recipe library includes proofread measured recipe ingredients
 
 test('saved repeat recipes can scale grocery quantities across selected days', () => {
   const preferences = normalizePreferences({
-    days: 10,
+    days: 5,
     proteins: ['Chicken'],
     mealSlots: [{ type: 'Dinner', time: '6:30 PM' }],
     servingsPerMeal: 2,
@@ -35,7 +37,7 @@ test('saved repeat recipes can scale grocery quantities across selected days', (
   });
   const plan = buildSavedRecipePlan(preferences);
   const hotPocket = plan.recipeLibrary.find((recipe) => recipe.name === 'Buffalo Chicken Hot Pockets');
-  const assignments = Array.from({ length: 10 }, (_, index) => ({
+  const assignments = Array.from({ length: 5 }, (_, index) => ({
     slotKey: `${index + 1}-Dinner-0`,
     dayNumber: index + 1,
     mealType: 'Dinner',
@@ -45,9 +47,16 @@ test('saved repeat recipes can scale grocery quantities across selected days', (
 
   const assigned = attachGroceryEstimate(buildAssignedMealPlan(plan, assignments), preferences);
   const flour = assigned.groceryEstimate.lineItems.find((item) => item.name === 'Flour and baking mix');
+  const chicken = assigned.groceryEstimate.lineItems.find((item) => item.name === 'Chicken breasts');
+  const yogurt = assigned.groceryEstimate.lineItems.find((item) => item.name === 'Greek yogurt');
+  const chives = assigned.groceryEstimate.lineItems.find((item) => item.name === 'Fresh chives');
   const buffalo = assigned.groceryEstimate.lineItems.find((item) => item.name === 'Buffalo sauce');
 
-  assert.equal(assigned.summary.totalMeals, 10);
-  assert.ok(flour?.quantityLabel);
+  assert.equal(assigned.summary.totalMeals, 5);
+  assert.match(chicken?.quantityLabel || '', /need ~2\.5 lb/);
+  assert.match(flour?.quantityLabel || '', /need 4 cups/);
+  assert.match(yogurt?.quantityLabel || '', /need 2\.1 cups/);
+  assert.match(chives?.quantityLabel || '', /need 10 g/);
   assert.ok(buffalo?.quantityLabel);
+  assert.ok(assigned.groceryEstimate.estimatedTotal < 100);
 });
