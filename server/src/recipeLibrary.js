@@ -157,12 +157,12 @@ export function attachRecipeLibrary(plan, preferences = plan.preferences || {}) 
 
 export function buildRecipeLibrary(plan, preferences = {}) {
   const mealTypes = getMealTypes(preferences, plan);
-  const totalTarget = getTotalTarget(mealTypes.length);
+  const totalTarget = getTotalTarget(mealTypes.length, preferences);
   const perType = Math.ceil(totalTarget / Math.max(1, mealTypes.length));
 
   return mealTypes.flatMap((mealType) =>
     Array.from({ length: perType }, (_, index) => buildOption({ mealType, index, preferences, plan }))
-  ).slice(0, 50);
+  ).slice(0, totalTarget);
 }
 
 function buildOption({ mealType, index, preferences, plan }) {
@@ -415,11 +415,16 @@ function getMealTypes(preferences, plan) {
   return [...new Set(fromPlan)].length > 0 ? [...new Set(fromPlan)] : ['Lunch', 'Dinner'];
 }
 
-function getTotalTarget(typeCount) {
-  if (typeCount <= 1) return 25;
-  if (typeCount === 2) return 30;
-  if (typeCount === 3) return 36;
-  return 48;
+function getTotalTarget(typeCount, preferences = {}) {
+  const requested = Number(preferences.recipeOptionTarget || 0);
+  if (Number.isFinite(requested) && requested > 0) {
+    return Math.min(80, Math.max(25, Math.round(requested)));
+  }
+
+  if (typeCount <= 1) return 40;
+  if (typeCount === 2) return 50;
+  if (typeCount === 3) return 60;
+  return 72;
 }
 
 function defaultTime(mealType) {

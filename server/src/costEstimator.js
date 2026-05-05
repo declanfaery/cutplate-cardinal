@@ -23,8 +23,9 @@ const PRICE_RULES = [
   { pattern: /shrimp/i, label: 'Shrimp', unit: 'oz', price: 8.99 / 16, measure: 'servingOunces', ouncesPerServing: 5, storePackage: fixedPackage(16, 8.99, 'bag', 'bags', '1 lb') },
   { pattern: /egg/i, label: 'Eggs and egg whites', unit: 'portion', price: 3.49 / 12, measure: 'portion', storePackage: fixedPackage(12, 3.49, 'dozen', 'dozens', '12 ct') },
   { pattern: /tofu/i, label: 'Extra-firm tofu', unit: 'oz', price: 2.49 / 14, measure: 'servingOunces', ouncesPerServing: 5, storePackage: fixedPackage(14, 2.49, 'block', 'blocks', '14 oz') },
+  { pattern: /self[-\s]?rising flour|flour/i, label: 'Flour and baking mix', unit: 'cup', price: 4.99 / 18, measure: 'cup', ouncesPerUnit: 4.4, defaultCups: 1, gramsPerCup: 125, storePackage: fixedPackage(18, 4.99, 'bag', 'bags', '5 lb') },
   { pattern: /greek yogurt sauce/i, label: 'Greek yogurt sauce', unit: 'tbsp', price: 5.49 / 32, measure: 'spoon', storePackage: fixedPackage(32, 5.49, 'tub', 'tubs', '16 oz') },
-  { pattern: /greek yogurt/i, label: 'Greek yogurt', unit: 'cup', price: 5.49 / 4, measure: 'cup', ouncesPerUnit: 8, defaultCups: 0.5, storePackage: fixedPackage(4, 5.49, 'tub', 'tubs', '32 oz') },
+  { pattern: /greek yogurt/i, label: 'Greek yogurt', unit: 'cup', price: 5.49 / 4, measure: 'cup', ouncesPerUnit: 8, defaultCups: 0.5, gramsPerCup: 245, storePackage: fixedPackage(4, 5.49, 'tub', 'tubs', '32 oz') },
   { pattern: /cottage cheese/i, label: 'Cottage cheese', unit: 'cup', price: 3.29 / 2, measure: 'cup', ouncesPerUnit: 8, defaultCups: 0.5, storePackage: fixedPackage(2, 3.29, 'tub', 'tubs', '16 oz') },
   { pattern: /sweet potato/i, label: 'Sweet potatoes', unit: 'cup', price: 1.49 / 2.9, measure: 'cup', ouncesPerUnit: 5.5, defaultCups: 0.5, storePackage: fixedPackage(2.9, 1.49, 'lb', 'lb', '~1 lb') },
   { pattern: /broccoli/i, label: 'Broccoli', unit: 'cup', price: 2.49 / 3, measure: 'cup', ouncesPerUnit: 3, defaultCups: 1, storePackage: fixedPackage(3, 2.49, 'crown', 'crowns', '~3 cups') },
@@ -37,7 +38,7 @@ const PRICE_RULES = [
   { pattern: /tomato/i, label: 'Tomatoes', unit: 'cup', price: 2.99 / 3.2, measure: 'cup', ouncesPerUnit: 5, defaultCups: 0.5, storePackage: fixedPackage(3.2, 2.99, 'lb', 'lb', '~1 lb') },
   { pattern: /black beans|beans/i, label: 'Beans', unit: 'cup', price: 1.39 / 1.5, measure: 'cup', ouncesPerUnit: 6, defaultCups: 0.5, storePackage: fixedPackage(1.5, 1.39, 'can', 'cans', '15 oz') },
   { pattern: /corn/i, label: 'Corn', unit: 'cup', price: 1.19 / 1.75, measure: 'cup', ouncesPerUnit: 5, defaultCups: 0.33, storePackage: fixedPackage(1.75, 1.19, 'can', 'cans', '15 oz') },
-  { pattern: /cheese/i, label: 'Reduced-fat cheese', unit: 'cup', price: 3.49 / 2, measure: 'cup', ouncesPerUnit: 4, defaultCups: 0.06, storePackage: fixedPackage(2, 3.49, 'bag', 'bags', '8 oz') },
+  { pattern: /cheese/i, label: 'Reduced-fat cheese', unit: 'cup', price: 3.49 / 2, measure: 'cup', ouncesPerUnit: 4, defaultCups: 0.06, gramsPerCup: 112, storePackage: fixedPackage(2, 3.49, 'bag', 'bags', '8 oz') },
   { pattern: /zucchini|green beans|asparagus/i, label: 'Green vegetables', unit: 'cup', price: 3.49 / 4, measure: 'cup', ouncesPerUnit: 4, defaultCups: 1, storePackage: fixedPackage(4, 3.49, 'bag', 'bags', '1 lb') },
   { pattern: /cauliflower rice/i, label: 'Cauliflower rice', unit: 'cup', price: 2.49 / 3, measure: 'cup', ouncesPerUnit: 4, defaultCups: 1, storePackage: fixedPackage(3, 2.49, 'bag', 'bags', '12 oz') },
   { pattern: /mixed vegetables|peppers|onions/i, label: 'Mixed vegetables', unit: 'cup', price: 1.49 / 4, measure: 'cup', ouncesPerUnit: 4, defaultCups: 1, storePackage: fixedPackage(4, 1.49, 'bag', 'bags', '1 lb') },
@@ -401,8 +402,8 @@ function measureIngredient(ingredient, rule, servings) {
   }
 
   if (rule.measure === 'servingOunces') {
-    if (parsed.unit === 'oz' || parsed.unit === 'lb') {
-      const quantity = parsed.unit === 'lb' ? amount * 16 : amount;
+    if (parsed.unit === 'oz' || parsed.unit === 'lb' || parsed.unit === 'g') {
+      const quantity = parsed.unit === 'lb' ? amount * 16 : parsed.unit === 'g' ? amount / 28.35 : amount;
       return {
         quantity,
         ounces: quantity,
@@ -419,7 +420,7 @@ function measureIngredient(ingredient, rule, servings) {
   }
 
   if (rule.measure === 'cup') {
-    const quantity = convertToCups(amount, parsed.unit, rule.defaultCups || 1) * servings;
+    const quantity = convertToCups(amount, parsed.unit, rule.defaultCups || 1, rule.gramsPerCup) * servings;
     return {
       quantity,
       ounces: quantity * Number(rule.ouncesPerUnit || 0),
@@ -497,15 +498,17 @@ function parseUnit(text = '') {
   if (/\btsp\b|teaspoons?/.test(text)) return 'tsp';
   if (/\boz\b|ounces?/.test(text)) return 'oz';
   if (/\blb\b|pounds?/.test(text)) return 'lb';
+  if (/\bg\b|grams?/.test(text)) return 'g';
   return 'each';
 }
 
-function convertToCups(amount, unit, defaultCups) {
+function convertToCups(amount, unit, defaultCups, gramsPerCup = 120) {
   if (unit === 'cup') return amount;
   if (unit === 'tbsp') return amount / 16;
   if (unit === 'tsp') return amount / 48;
   if (unit === 'oz') return amount / 8;
   if (unit === 'lb') return amount * 2;
+  if (unit === 'g') return amount / Number(gramsPerCup || 120);
   if (unit === 'serving') return amount * defaultCups;
   return amount * defaultCups;
 }

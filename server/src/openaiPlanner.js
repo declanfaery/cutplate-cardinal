@@ -149,7 +149,7 @@ export async function generateAiMealPlan(input = {}) {
           {
             type: 'input_text',
             text:
-              `You create original, health-focused weight-loss meal plans. ${discoveryInstruction} Return only valid JSON matching the schema. Macro numbers must be realistic per-serving estimates, not full-recipe totals and not medical claims. The calorieTarget preference means target calories per meal for one serving, not a daily calorie target. servingsPerMeal affects ingredient quantities and grocery cost, but macros in the response must remain per-serving. Never put serving counts in recipe names. Respect the user grocery budget by using cheaper staples for low budgets and more premium proteins only when the budget allows it. Name turkey as 93% lean ground turkey unless the user explicitly asks for another cut. Use human-readable creator/source labels without @ handles in app output.`
+              `You create original, health-focused weight-loss meal plans. ${discoveryInstruction} Return only valid JSON matching the schema. Macro numbers must be realistic per-serving estimates, not full-recipe totals and not medical claims. The calorieTarget preference means target calories per meal for one serving, not a daily calorie target. servingsPerMeal affects ingredient quantities and grocery cost, but macros in the response must remain per-serving. Never put serving counts in recipe names. Respect the user grocery budget by using cheaper staples for low budgets and more premium proteins only when the budget allows it. Name turkey as 93% lean ground turkey unless the user explicitly asks for another cut. Use human-readable creator/source labels without @ handles in app output. Use Fahrenheit for all cooking temperatures.`
           }
         ]
       },
@@ -161,7 +161,7 @@ export async function generateAiMealPlan(input = {}) {
             text: JSON.stringify(
               {
                 task:
-                  'Create a complete meal plan and a selectable recipeLibrary of 25-50 sourced recipe options. Use web-discovered recipes and public recipe/social inspiration as source material, then summarize/adapt in original words. Do not create repeated template names like Lime Chili Protein Bowl or Garlic Herb Protein Plate. Recipe names should reflect the actual food and source concept. Use source nutrition/macros when available; otherwise estimate per-serving macros from ingredient amounts. Do not use the same calorie number for every recipe. Use calorieTarget as the per-meal target for one serving. dailyCalorieTarget is calorieTarget multiplied by selected meals per day, and cookedDailyCalorieTarget is further multiplied by servingsPerMeal; use those derived values only for planning scale, not for per-serving macro output. Use the groceryBudget preference before choosing recipes. Treat the budget as the full selected menu budget, then divide by days * selected meal slots to reason about budget per recipe. Low budgets should lean on lower-cost real recipes and staples. Higher budgets can include premium recipes like steak, salmon, shrimp, quinoa, and higher-cost vegetables. If pantryIngredients are provided, prefer recipes that naturally use those ingredients without forcing them into every meal. List every seasoning and sauce as its own measured ingredient using tbsp or tsp. Do not use vague ingredients like seasonings, spices, or sauce to taste.',
+                  'Create a complete meal plan and a selectable recipeLibrary with exactly preferences.recipeOptionTarget sourced recipe options when possible. Use web-discovered recipes and public recipe/social inspiration as source material, then summarize/adapt in original words. Do not create repeated template names like Lime Chili Protein Bowl or Garlic Herb Protein Plate. Recipe names should reflect the actual food and source concept. Do not return recipes named in preferences.excludeRecipeNames. Use source nutrition/macros when available; otherwise estimate per-serving macros from ingredient amounts. Do not use the same calorie number for every recipe. Use calorieTarget as the per-meal target for one serving. dailyCalorieTarget is calorieTarget multiplied by selected meals per day, and cookedDailyCalorieTarget is further multiplied by servingsPerMeal; use those derived values only for planning scale, not for per-serving macro output. Use the groceryBudget preference before choosing recipes. Treat the budget as the full selected menu budget, then divide by days * selected meal slots to reason about budget per recipe. Low budgets should lean on lower-cost real recipes and staples. Higher budgets can include premium recipes like steak, salmon, shrimp, quinoa, and higher-cost vegetables. If pantryIngredients are provided, prefer recipes that naturally use those ingredients without forcing them into every meal. List every seasoning and sauce as its own measured ingredient using tbsp or tsp. Do not use vague ingredients like seasonings, spices, or sauce to taste. Use Fahrenheit for all cooking temperatures.',
                 preferences,
                 sourceSeeds,
                 sourcePolicy: SOURCE_POLICY_NOTES,
@@ -368,7 +368,7 @@ export function normalizeGeneratedRecipe(recipe = {}, index, mealType) {
       ? normalizeIngredientLines(recipe.ingredients)
       : [],
     steps: Array.isArray(recipe.steps)
-      ? recipe.steps.map(stripLeadingStepNumber).filter(Boolean)
+      ? recipe.steps.map(stripLeadingStepNumber).map(convertTemperaturesToFahrenheit).filter(Boolean)
       : [],
     sources: Array.isArray(recipe.sources)
       ? recipe.sources.filter((source) => source?.url && source?.label).slice(0, 3)
@@ -471,6 +471,12 @@ function normalizeMacroRating(value = '') {
 
 function stripLeadingStepNumber(value = '') {
   return String(value || '').trim().replace(/^\s*\d+[\).]\s*/, '');
+}
+
+function convertTemperaturesToFahrenheit(value = '') {
+  return String(value || '')
+    .replace(/(\d{2,3})\s*(?:°\s*)?C\b/gi, (_, celsius) => `${Math.round(Number(celsius) * 9 / 5 + 32)} F`)
+    .replace(/(\d{3})\s*(?:°\s*)?F\b/gi, (_, fahrenheit) => `${fahrenheit} F`);
 }
 
 function normalizeRecipeCount(value, fallback = 9) {

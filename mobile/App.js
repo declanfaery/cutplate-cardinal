@@ -142,6 +142,7 @@ export default function App() {
   const [pantryIngredients, setPantryIngredients] = useState('');
   const [shoppingLocation, setShoppingLocation] = useState('');
   const [sourceHandles, setSourceHandles] = useState(SOURCE_OPTIONS);
+  const [recipeVarietyMode, setRecipeVarietyMode] = useState('different');
   const [plan, setPlan] = useState(null);
   const [planStage, setPlanStage] = useState('menu');
   const [selectedMealIds, setSelectedMealIds] = useState([]);
@@ -151,6 +152,7 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isEstimating, setIsEstimating] = useState(false);
+  const [isFindingMoreMenu, setIsFindingMoreMenu] = useState(false);
   const [menuPricing, setMenuPricing] = useState({ selectedTotal: 0, marginalCosts: {} });
   const [cachedRecipes, setCachedRecipes] = useState([]);
   const [pantryMealType, setPantryMealType] = useState('Dinner');
@@ -170,7 +172,7 @@ export default function App() {
   const pricingRequestId = useRef(0);
 
   const enabledSlots = useMemo(() => mealSlots.filter((slot) => slot.enabled), [mealSlots]);
-  const stepCount = 11;
+  const stepCount = 12;
   const atLastStep = step === stepCount - 1;
   const activeResultPlan = selectedMenuPlan || plan;
   const activeDay = activeResultPlan?.days?.[selectedDay] || activeResultPlan?.days?.[0];
@@ -180,8 +182,8 @@ export default function App() {
   const mealTypeRequirements = useMemo(() => getMealTypeRequirements(targetSlots), [targetSlots]);
   const selectedCounts = useMemo(() => getSelectedMealCounts(selectedMeals), [selectedMeals]);
   const assignedMeals = useMemo(
-    () => buildAssignmentsFromSelected(targetSlots, selectedMeals),
-    [selectedMeals, targetSlots]
+    () => buildAssignmentsFromSelected(targetSlots, selectedMeals, recipeVarietyMode === 'same'),
+    [recipeVarietyMode, selectedMeals, targetSlots]
   );
   const selectedMealCount = selectedMeals.length;
   const fallbackMenuEstimate = useMemo(
@@ -230,7 +232,7 @@ export default function App() {
   const canContinue = useMemo(() => {
     if (step === 1) return selectedProteins.length > 0;
     if (step === 3) return enabledSlots.length > 0;
-    if (step === 8) return Number(budgetTarget || 0) > 0;
+    if (step === 9) return Number(budgetTarget || 0) > 0;
     return true;
   }, [budgetTarget, enabledSlots.length, selectedProteins.length, step]);
 
@@ -679,6 +681,9 @@ export default function App() {
 
     const requestId = pricingRequestId.current + 1;
     pricingRequestId.current = requestId;
+    const pricingSelectedMeals = recipeVarietyMode === 'same'
+      ? assignedMeals.map((assignment) => assignment.meal)
+      : selectedMeals;
 
     const refreshMenuPricing = async () => {
       try {
@@ -686,7 +691,7 @@ export default function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            selectedMeals,
+            selectedMeals: pricingSelectedMeals,
             optionMeals: mealOptions,
             preferences: {
               servingsPerMeal,
@@ -716,7 +721,7 @@ export default function App() {
     };
 
     refreshMenuPricing();
-  }, [fallbackMenuEstimate, mealOptions, plan, planStage, selectedMeals, servingsPerMeal, shoppingLocation]);
+  }, [assignedMeals, fallbackMenuEstimate, mealOptions, plan, planStage, recipeVarietyMode, selectedMeals, servingsPerMeal, shoppingLocation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -763,7 +768,7 @@ export default function App() {
 
     if (Number(budgetTarget || 0) <= 0) {
       setError('Enter a grocery budget.');
-      setStep(8);
+      setStep(9);
       return;
     }
 
@@ -789,7 +794,10 @@ export default function App() {
           avoidIngredients: selectedAvoids,
           pantryIngredients,
           location: shoppingLocation,
-          sourceHandles
+          sourceHandles,
+          recipeVarietyMode,
+          recipeOptionTarget: getRecipeOptionTarget(days, enabledSlots.length),
+          excludeRecipeNames: []
         })
       });
 
@@ -808,6 +816,72 @@ export default function App() {
       setError(formatApiFailure('Plan generation failed', requestError));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const findMoreMenuOptions = async () => {
+    if (!plan || isFindingMoreMenu) return;
+    if (recipeVarietyMode === 'same') {
+      setError('Repeat recipe mode uses the saved recipe library. Add new saved recipes on the server to expand this list.');
+      return;
+    }
+
+    setError('');
+    setIsFindingMoreMenu(true);
+
+    try {
+      const currentOptions = mealOptions.map((meal) => meal.name).filter(Boolean);
+      const response = await fetchWithRetry(`${API_URL}/api/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          days,
+          weekdaysOnly,
+          proteins: selectedProteins,
+          mealSlots: enabledSlots.map(({ type, time }) => ({ type, time })),
+          servingsPerMeal,
+          allergies,
+          dietStyle,
+          calorieTarget: Number(calorieTarget),
+          calorieTargetBasis: 'per_meal_per_serving',
+          dailyCalorieTarget: getDailyCalorieTarget(calorieTarget, enabledSlots.length),
+          cookedDailyCalorieTarget: getCookedDailyCalorieTarget(calorieTarget, enabledSlots.length, servingsPerMeal),
+          groceryBudget: Number(budgetTarget),
+          avoidIngredients: selectedAvoids,
+          pantryIngredients,
+          location: shoppingLocation,
+          sourceHandles,
+          recipeVarietyMode,
+          recipeOptionTarget: getRecipeOptionTarget(days, enabledSlots.length),
+          recipeVariant: `more-${Date.now()}`,
+          forceFresh: true,
+          excludeRecipeNames: currentOptions
+        })
+      }, 1);
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const data = await response.json();
+      const nextLibrary = uniqueRecipeList([
+        ...(plan.recipeLibrary || []),
+        ...((data.plan?.recipeLibrary || []).map((meal, index) => ({
+          ...meal,
+          optionKey: meal.optionKey || meal.id || `more-${Date.now()}-${index}`
+        })))
+      ]);
+
+      setPlan({
+        ...plan,
+        recipeLibrary: nextLibrary,
+        warnings: [...new Set([...(plan.warnings || []), ...(data.warnings || [])])]
+      });
+      setWarnings((current) => [...new Set([...current, ...(data.warnings || [])])]);
+    } catch (requestError) {
+      setError(formatApiFailure('Could not find more recipe options', requestError));
+    } finally {
+      setIsFindingMoreMenu(false);
     }
   };
 
@@ -831,8 +905,10 @@ export default function App() {
   };
 
   const estimateAssignedMenu = async () => {
-    if (!plan || !areMealRequirementsMet(mealTypeRequirements, selectedCounts)) {
-      setError('Pick at least one recipe, then I can fit the selected meals into days.');
+    if (!plan || !areMealRequirementsMet(mealTypeRequirements, selectedCounts, recipeVarietyMode)) {
+      setError(recipeVarietyMode === 'same'
+        ? 'Pick at least one saved recipe for each selected meal type.'
+        : 'Pick every recipe slot, then I can fit the selected meals into days.');
       return;
     }
 
@@ -1012,13 +1088,16 @@ export default function App() {
                 selectedCounts={selectedCounts}
                 mealTypeRequirements={mealTypeRequirements}
                 toggleLibraryMeal={toggleLibraryMeal}
+                recipeVarietyMode={recipeVarietyMode}
                 selectedMealCount={selectedMealCount}
                 liveMenuEstimate={liveMenuEstimate}
                 menuPricing={menuPricing}
                 budgetAmount={budgetAmount}
                 budgetRemaining={budgetRemaining}
+                onFindMoreOptions={findMoreMenuOptions}
                 onContinue={estimateAssignedMenu}
                 isEstimating={isEstimating}
+                isFindingMore={isFindingMoreMenu}
                 error={error}
               />
             ) : null}
@@ -1091,7 +1170,7 @@ export default function App() {
             <View style={styles.stepHeader}>
               <Text style={styles.question}>{getQuestion(step)}</Text>
             </View>
-            <GuidePrompt step={step} active={isLoading || step === 10} />
+            <GuidePrompt step={step} active={isLoading || step === 11} />
 
             {step === 0 ? (
               <DaysStep
@@ -1114,11 +1193,17 @@ export default function App() {
               <MealCountStep mealCount={enabledSlots.length} setMealsPerDay={setMealsPerDay} />
             ) : null}
             {step === 3 ? <MealsStep mealSlots={mealSlots} updateMealSlot={updateMealSlot} /> : null}
-            {step === 4 ? <AllergiesStep allergies={allergies} toggleAllergy={toggleAllergy} /> : null}
-            {step === 5 ? (
+            {step === 4 ? (
+              <RecipeVarietyStep
+                recipeVarietyMode={recipeVarietyMode}
+                setRecipeVarietyMode={setRecipeVarietyMode}
+              />
+            ) : null}
+            {step === 5 ? <AllergiesStep allergies={allergies} toggleAllergy={toggleAllergy} /> : null}
+            {step === 6 ? (
               <ServingsStep servingsPerMeal={servingsPerMeal} setServingsPerMeal={setServingsPerMeal} />
             ) : null}
-            {step === 6 ? (
+            {step === 7 ? (
               <GoalStep
                 dietStyle={dietStyle}
                 setDietStyle={setDietStyle}
@@ -1132,17 +1217,17 @@ export default function App() {
                 setPantryIngredients={setPantryIngredients}
               />
             ) : null}
-            {step === 7 ? (
+            {step === 8 ? (
               <LocationStep shoppingLocation={shoppingLocation} setShoppingLocation={setShoppingLocation} />
             ) : null}
-            {step === 8 ? <BudgetPreferenceStep budgetTarget={budgetTarget} setBudgetTarget={setBudgetTarget} /> : null}
-            {step === 9 ? (
+            {step === 9 ? <BudgetPreferenceStep budgetTarget={budgetTarget} setBudgetTarget={setBudgetTarget} /> : null}
+            {step === 10 ? (
               <SourcesStep
                 socialSourcesEnabled={sourceHandles.length > 0}
                 setSocialSourcesEnabled={setSocialSourcesEnabled}
               />
             ) : null}
-            {step === 10 ? (
+            {step === 11 ? (
               <ReviewStep
                 days={days}
                 weekdaysOnly={weekdaysOnly}
@@ -1156,6 +1241,7 @@ export default function App() {
                 budgetTarget={budgetTarget}
                 shoppingLocation={shoppingLocation}
                 sourceHandles={sourceHandles}
+                recipeVarietyMode={recipeVarietyMode}
               />
             ) : null}
 
@@ -1183,6 +1269,7 @@ function getQuestion(step) {
     'What protein do you want?',
     'How many meals per day?',
     'When do you want to eat?',
+    'Different recipes or repeat favorites?',
     'Any allergies?',
     'How many servings per meal?',
     'What goal should this follow?',
@@ -1201,6 +1288,7 @@ function getGuideText(step) {
     'Pick proteins you actually want to eat this week.',
     'Choose the number of meal slots. You can still turn specific meals off next.',
     'Set the meal times so the menu feels like your real day.',
+    'Pick different recipes for variety, or repeat saved favorites and scale the ingredients.',
     'Tap any allergy so I keep it out of the plan.',
     'Servings drive both recipe amounts and grocery cost.',
     'Give me the nutrition lane, avoids, and anything already in your kitchen.',
@@ -1387,14 +1475,24 @@ function sortMealTypes(a, b) {
   return order.indexOf(a) - order.indexOf(b);
 }
 
-function areMealRequirementsMet(requirements, selectedCounts) {
+function areMealRequirementsMet(requirements, selectedCounts, recipeVarietyMode = 'different') {
   const totalSelected = Object.values(selectedCounts).reduce((total, count) => total + count, 0);
   if (totalSelected <= 0) return false;
 
-  return Object.entries(selectedCounts).every(([mealType, count]) => count <= (requirements[mealType] || 0));
+  const requiredEntries = Object.entries(requirements).filter(([, required]) => required > 0);
+  if (!requiredEntries.length) return false;
+
+  if (recipeVarietyMode === 'same') {
+    return requiredEntries.every(([mealType, required]) => {
+      const count = selectedCounts[mealType] || 0;
+      return count >= 1 && count <= required;
+    });
+  }
+
+  return requiredEntries.every(([mealType, required]) => (selectedCounts[mealType] || 0) === required);
 }
 
-function buildAssignmentsFromSelected(targetSlots, selectedMeals) {
+function buildAssignmentsFromSelected(targetSlots, selectedMeals, allowRepeats = false) {
   const mealsByType = selectedMeals.reduce((groups, meal, index) => {
     const next = groups.get(meal.mealType) || [];
     next.push({ meal, index });
@@ -1403,6 +1501,35 @@ function buildAssignmentsFromSelected(targetSlots, selectedMeals) {
   }, new Map());
 
   const dayProteinCounts = new Map();
+
+  if (allowRepeats) {
+    const countersByType = new Map();
+    return targetSlots
+      .map((slot) => {
+        const pool = mealsByType.get(slot.mealType) || [];
+        if (!pool.length) return null;
+
+        const dayProteins = dayProteinCounts.get(slot.dayNumber) || new Map();
+        const startIndex = countersByType.get(slot.mealType) || 0;
+        const orderedPool = pool.map((entry, index) => ({ ...entry, repeatIndex: index }));
+        const rotatedPool = [...orderedPool.slice(startIndex % orderedPool.length), ...orderedPool.slice(0, startIndex % orderedPool.length)];
+        const bestEntry = rotatedPool[getBestMealIndexForSlot(rotatedPool, dayProteins)] || rotatedPool[0];
+        countersByType.set(slot.mealType, startIndex + 1);
+
+        const proteinKey = normalizeProteinKey(bestEntry.meal.protein || bestEntry.meal.name);
+        dayProteins.set(proteinKey, (dayProteins.get(proteinKey) || 0) + 1);
+        dayProteinCounts.set(slot.dayNumber, dayProteins);
+
+        return {
+          slotKey: slot.key,
+          dayNumber: slot.dayNumber,
+          mealType: slot.mealType,
+          time: slot.time,
+          meal: bestEntry.meal
+        };
+      })
+      .filter(Boolean);
+  }
 
   return targetSlots
     .map((slot) => {
@@ -1530,6 +1657,11 @@ function getCookedDailyCalorieTarget(calorieTarget, mealCount, servingsPerMeal) 
   const daily = getDailyCalorieTarget(calorieTarget, mealCount);
   const servings = Math.max(1, Number(servingsPerMeal || 1));
   return daily > 0 ? Math.round(daily * servings) : 0;
+}
+
+function getRecipeOptionTarget(days, mealCount) {
+  const totalSlots = Math.max(1, Number(days || 0) * Math.max(1, Number(mealCount || 1)));
+  return Math.min(80, Math.max(40, totalSlots * 3));
 }
 
 function formatCalorieTargetSummary(calorieTarget, mealCount, servingsPerMeal) {
@@ -2605,6 +2737,8 @@ function DaysStep({ days, setDays, weekdaysOnly, setWeekdaysOnly }) {
 }
 
 function ProteinStep({ selectedProteins, toggleProtein, customProtein, setCustomProtein, addCustomProtein }) {
+  const customSelections = selectedProteins.filter((protein) => !PROTEIN_OPTIONS.includes(protein));
+
   return (
     <View style={styles.stack}>
       <View style={styles.choiceGrid}>
@@ -2624,6 +2758,8 @@ function ProteinStep({ selectedProteins, toggleProtein, customProtein, setCustom
           placeholder="Add your own"
           placeholderTextColor="#999999"
           style={styles.cleanInput}
+          autoCapitalize="words"
+          autoCorrect={false}
           returnKeyType="done"
           blurOnSubmit
           onSubmitEditing={() => {
@@ -2636,6 +2772,19 @@ function ProteinStep({ selectedProteins, toggleProtein, customProtein, setCustom
           <Plus color={COLORS.white} size={22} strokeWidth={3} />
         </Pressable>
       </View>
+      {customProtein.trim() ? <Text style={styles.inputEcho}>Typing: {customProtein.trim()}</Text> : null}
+      {customSelections.length ? (
+        <View style={styles.customSelectionWrap}>
+          {customSelections.map((protein) => (
+            <PillOption
+              key={protein}
+              label={protein}
+              selected
+              onPress={() => toggleProtein(protein)}
+            />
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -2691,6 +2840,27 @@ function MealsStep({ mealSlots, updateMealSlot }) {
           </View>
         </View>
       ))}
+    </View>
+  );
+}
+
+function RecipeVarietyStep({ recipeVarietyMode, setRecipeVarietyMode }) {
+  return (
+    <View style={styles.largeChoiceStack}>
+      <Pressable
+        onPress={() => setRecipeVarietyMode('different')}
+        style={[styles.largeChoice, recipeVarietyMode === 'different' && styles.largeChoiceSelected]}
+      >
+        <Text style={styles.largeChoiceTitle}>Different recipes</Text>
+        <Text style={styles.largeChoiceSub}>build a full menu with unique meals</Text>
+      </Pressable>
+      <Pressable
+        onPress={() => setRecipeVarietyMode('same')}
+        style={[styles.largeChoice, recipeVarietyMode === 'same' && styles.largeChoiceSelected]}
+      >
+        <Text style={styles.largeChoiceTitle}>Repeat favorites</Text>
+        <Text style={styles.largeChoiceSub}>pick saved recipes and scale them by days</Text>
+      </Pressable>
     </View>
   );
 }
@@ -2901,13 +3071,18 @@ function ReviewStep({
   pantryIngredients,
   budgetTarget,
   shoppingLocation,
-  sourceHandles
+  sourceHandles,
+  recipeVarietyMode
 }) {
   return (
     <View style={styles.reviewStack}>
       <SummaryLine label="Length" value={`${days} days${weekdaysOnly ? ', weekdays only' : ''}`} />
       <SummaryLine label="Proteins" value={selectedProteins.join(', ')} />
       <SummaryLine label="Meals" value={enabledSlots.map((slot) => `${slot.type} ${slot.time}`).join(', ')} />
+      <SummaryLine
+        label="Recipe style"
+        value={recipeVarietyMode === 'same' ? 'Repeat saved favorites' : 'Different recipes'}
+      />
       <SummaryLine label="Servings" value={`${servingsPerMeal} per meal`} />
       <SummaryLine label="Allergies" value={allergies.length ? allergies.join(', ') : 'None selected'} />
       <SummaryLine
@@ -2988,19 +3163,23 @@ function MenuBuilderScreen({
   selectedCounts,
   mealTypeRequirements,
   toggleLibraryMeal,
+  recipeVarietyMode,
   selectedMealCount,
   liveMenuEstimate,
   menuPricing,
   budgetAmount,
   budgetRemaining,
+  onFindMoreOptions,
   onContinue,
   isEstimating,
+  isFindingMore,
   error
 }) {
   const mealTypes = Object.keys(mealTypeRequirements).sort(sortMealTypes);
-  const allRequirementsMet = areMealRequirementsMet(mealTypeRequirements, selectedCounts);
+  const allRequirementsMet = areMealRequirementsMet(mealTypeRequirements, selectedCounts, recipeVarietyMode);
   const isOverBudget = budgetAmount > 0 && budgetRemaining < 0;
   const marginalCosts = menuPricing?.marginalCosts || {};
+  const repeatMode = recipeVarietyMode === 'same';
   const budgetLabel = budgetAmount > 0
     ? `$${Math.abs(budgetRemaining || 0).toFixed(2)} ${isOverBudget ? 'over' : 'left'}`
     : 'Set a budget';
@@ -3017,12 +3196,18 @@ function MenuBuilderScreen({
           <View style={styles.menuGuideRow}>
             <CardinalMascot active={isEstimating} compact />
             <View style={styles.guideBubble}>
-              <Text style={styles.guideText}>These options were shaped around your budget. Pick what sounds good, then I will fit it into days.</Text>
+              <Text style={styles.guideText}>
+                {repeatMode
+                  ? 'Pick one or more saved recipes per meal type. I will repeat them across the days and scale the shopping list.'
+                  : 'These options were shaped around your budget. Pick what sounds good, then I will fit it into days.'}
+              </Text>
             </View>
           </View>
           <Text style={styles.resultTitle}>Build your menu.</Text>
           <Text style={styles.resultSubtitle}>
-            {selectedMealCount} of {targetSlots.length} recipes selected from {mealOptions.length} options.
+            {repeatMode
+              ? `${selectedMealCount} repeat recipe${selectedMealCount === 1 ? '' : 's'} selected from ${mealOptions.length} saved options.`
+              : `${selectedMealCount} of ${targetSlots.length} recipes selected from ${mealOptions.length} options.`}
           </Text>
         </View>
 
@@ -3054,7 +3239,7 @@ function MenuBuilderScreen({
                 <View style={styles.categoryHeader}>
                   <Text style={styles.menuDayTitle}>{mealType}</Text>
                   <Text style={styles.categoryCount}>
-                    {selectedForType}/{required} max
+                    {repeatMode ? `${selectedForType}/${required} repeatable` : `${selectedForType}/${required} max`}
                   </Text>
                 </View>
                 <View style={styles.optionStack}>
@@ -3097,6 +3282,17 @@ function MenuBuilderScreen({
             );
           })}
         </View>
+
+        {!repeatMode ? (
+          <Pressable
+            onPress={onFindMoreOptions}
+            disabled={isFindingMore}
+            style={[styles.secondaryActionButton, isFindingMore && styles.secondaryActionButtonDisabled]}
+          >
+            {isFindingMore ? <ActivityIndicator color={COLORS.cardinal} /> : <RefreshCw color={COLORS.cardinal} size={18} />}
+            <Text style={styles.regenerateText}>{isFindingMore ? 'Finding more recipes' : 'Find more recipe options'}</Text>
+          </Pressable>
+        ) : null}
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </ScrollView>
@@ -4095,6 +4291,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     borderWidth: 0
   },
+  inputEcho: {
+    color: COLORS.muted,
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: '800',
+    marginTop: -8
+  },
+  customSelectionWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10
+  },
   calorieTargetHint: {
     color: COLORS.muted,
     fontSize: 14,
@@ -4981,6 +5189,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     marginTop: 18
+  },
+  secondaryActionButton: {
+    minHeight: 54,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#ffe0e4',
+    backgroundColor: COLORS.white,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 6
+  },
+  secondaryActionButtonDisabled: {
+    opacity: 0.55
   },
   regenerateText: {
     color: COLORS.cardinal,

@@ -3,8 +3,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const CACHE_VERSION = 'cutplate-plan-cache-v8';
-const RECIPE_CACHE_VERSION = 'cutplate-recipe-cache-v2';
+const CACHE_VERSION = 'cutplate-plan-cache-v9';
+const RECIPE_CACHE_VERSION = 'cutplate-recipe-cache-v3';
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -309,6 +309,8 @@ function buildPlanFingerprint(preferences = {}) {
     avoidIngredients: normalizeText(preferences.avoidIngredients),
     pantryIngredients: normalizeText(preferences.pantryIngredients),
     recipeMode: normalizeText(preferences.recipeMode),
+    recipeVarietyMode: normalizeText(preferences.recipeVarietyMode),
+    recipeOptionTarget: Number(preferences.recipeOptionTarget || 0),
     recipeVariant: normalizeText(preferences.recipeVariant),
     weekdaysOnly: Boolean(preferences.weekdaysOnly),
     sourceHandles: normalizeList(preferences.sourceHandles)

@@ -71,7 +71,7 @@ test('builds a large selectable recipe library with varied per-meal calories', (
     servingsPerMeal: 2
   });
 
-  assert.equal(plan.recipeLibrary.length, 48);
+  assert.equal(plan.recipeLibrary.length, 60);
 
   const lunchOptions = plan.recipeLibrary.filter((meal) => meal.mealType === 'Lunch');
   const lunchCalories = new Set(lunchOptions.map((meal) => meal.macros.calories));

@@ -10,6 +10,7 @@ import {
   buildSelectedMealPlan,
   estimateSelectionPricing
 } from './costEstimator.js';
+import { buildSavedRecipePlan } from './savedRecipes.js';
 import {
   buildPlanCacheKey,
   getCacheSettings,
@@ -288,14 +289,21 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
 
 app.post('/api/plan', async (req, res) => {
   const preferences = normalizePreferences(req.body);
-  const cached = await getCachedPlan(preferences);
+  const forceFresh = parseBoolean(req.body?.forceFresh) || Boolean(preferences.recipeVariant);
+  const cached = forceFresh ? null : await getCachedPlan(preferences);
   const aiConfigured = Boolean(process.env.OPENAI_API_KEY);
 
   if (cached && (!aiConfigured || cached.mode === 'ai')) {
     return res.json(cached);
   }
 
-  const cachedRecipeResponse = await buildCachedRecipePlanResponse(preferences);
+  if (preferences.recipeVarietyMode === 'same') {
+    const savedResponse = buildSavedRecipePlanResponse(preferences);
+    await setCachedPlan(preferences, savedResponse);
+    return res.json(stampUncachedResponse(savedResponse, preferences));
+  }
+
+  const cachedRecipeResponse = forceFresh ? null : await buildCachedRecipePlanResponse(preferences);
   if (cachedRecipeResponse) {
     return res.json(cachedRecipeResponse);
   }
@@ -672,6 +680,15 @@ async function buildAiPlanResponse(preferences) {
     plan: aiPlan,
     warnings: [],
     mode: 'ai'
+  };
+}
+
+function buildSavedRecipePlanResponse(preferences) {
+  const savedPlan = attachGroceryEstimate(buildSavedRecipePlan(preferences), preferences);
+  return {
+    plan: savedPlan,
+    warnings: ['Showing saved repeat recipes. Pick one or more favorites and I will scale the grocery list across your selected days.'],
+    mode: 'saved'
   };
 }
 

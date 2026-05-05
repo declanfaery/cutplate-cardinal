@@ -242,6 +242,12 @@ export function normalizePreferences(input = {}) {
   const calorieTarget = Number(input.calorieTarget);
   const servingsPerMeal = Number(input.servingsPerMeal);
   const groceryBudget = Number(input.groceryBudget ?? input.budgetTarget ?? input.budget);
+  const mealSlotCount = mealSlots.length > 0 ? mealSlots.length : DEFAULT_MEAL_SLOTS.length;
+  const recipeOptionTarget = normalizeRecipeOptionTarget(input.recipeOptionTarget, days, mealSlotCount);
+  const recipeVarietyMode = normalizeRecipeVarietyMode(input.recipeVarietyMode || input.recipeVariety);
+  const excludeRecipeNames = Array.isArray(input.excludeRecipeNames)
+    ? input.excludeRecipeNames.map((name) => String(name || '').trim()).filter(Boolean).slice(0, 120)
+    : [];
   const allergies = Array.isArray(input.allergies)
     ? input.allergies.map((allergy) => String(allergy || '').trim()).filter(Boolean).slice(0, 16)
     : [];
@@ -265,11 +271,27 @@ export function normalizePreferences(input = {}) {
     dietStyle: cleanText(input.dietStyle, 'Balanced'),
     avoidIngredients: cleanText(input.avoidIngredients, ''),
     pantryIngredients: cleanText(input.pantryIngredients, ''),
+    recipeOptionTarget,
+    recipeVarietyMode,
+    recipeMode: cleanText(input.recipeMode, ''),
+    recipeVariant: cleanText(input.recipeVariant, ''),
+    excludeRecipeNames,
     weekdaysOnly: Boolean(input.weekdaysOnly),
     sourceHandles: Array.isArray(input.sourceHandles)
       ? input.sourceHandles.map((handle) => String(handle).trim()).filter(Boolean)
       : []
   };
+}
+
+function normalizeRecipeOptionTarget(value, days, mealSlotCount) {
+  const requested = Number(value);
+  const computed = Math.max(40, Number(days || 0) * Math.max(1, Number(mealSlotCount || 1)) * 3);
+  const target = Number.isFinite(requested) && requested > 0 ? requested : computed;
+  return Math.min(80, Math.max(25, Math.round(target)));
+}
+
+function normalizeRecipeVarietyMode(value = '') {
+  return String(value || '').trim().toLowerCase() === 'same' ? 'same' : 'different';
 }
 
 export function buildMealPlan(input = {}) {
