@@ -2174,12 +2174,34 @@ function OnboardingScreen({
   const isSignup = slideIndex >= ONBOARDING_SLIDES.length;
   const slide = ONBOARDING_SLIDES[Math.min(slideIndex, ONBOARDING_SLIDES.length - 1)];
   const onboardingScrollRef = useRef(null);
-  const scrollSignupInputIntoView = () => {
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const compactSignup = isSignup && isKeyboardVisible;
+  const scrollSignupInputIntoView = (y = 180) => {
     if (!isSignup) return;
     setTimeout(() => {
-      onboardingScrollRef.current?.scrollToEnd({ animated: true });
+      onboardingScrollRef.current?.scrollTo({ y, animated: true });
     }, 120);
+    setTimeout(() => {
+      onboardingScrollRef.current?.scrollTo({ y, animated: true });
+    }, 360);
   };
+
+  useEffect(() => {
+    if (!isSignup) {
+      setIsKeyboardVisible(false);
+      return undefined;
+    }
+
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSubscription = Keyboard.addListener(showEvent, () => setIsKeyboardVisible(true));
+    const hideSubscription = Keyboard.addListener(hideEvent, () => setIsKeyboardVisible(false));
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [isSignup]);
 
   return (
     <KeyboardAvoidingView
@@ -2194,15 +2216,22 @@ function OnboardingScreen({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.onboardingScroll, isSignup && styles.onboardingScrollSignup]}
       >
-      <View style={styles.onboardingHero}>
-        <CardinalMascot active compact />
-        <Text style={styles.homeTitle}>{isSignup ? 'Create your profile.' : slide.title}</Text>
-        <Text style={styles.homeSubtitle}>
-          {isSignup
-            ? 'Optional: add your name and email to save preferences and favorite recipes. You can use recipes without an account.'
-            : slide.body}
-        </Text>
-      </View>
+      {compactSignup ? (
+        <View style={styles.onboardingHeroCompact}>
+          <Text style={styles.signupCompactTitle}>Create your profile.</Text>
+          <Text style={styles.signupCompactSubtitle}>Email is optional. You can keep using recipes without an account.</Text>
+        </View>
+      ) : (
+        <View style={styles.onboardingHero}>
+          <CardinalMascot active compact />
+          <Text style={styles.homeTitle}>{isSignup ? 'Create your profile.' : slide.title}</Text>
+          <Text style={styles.homeSubtitle}>
+            {isSignup
+              ? 'Optional: add your name and email to save preferences and favorite recipes. You can use recipes without an account.'
+              : slide.body}
+          </Text>
+        </View>
+      )}
 
       {!isSignup ? (
         <>
@@ -2233,7 +2262,7 @@ function OnboardingScreen({
               style={styles.cleanInput}
               returnKeyType="done"
               blurOnSubmit
-              onFocus={scrollSignupInputIntoView}
+              onFocus={() => scrollSignupInputIntoView(120)}
               onSubmitEditing={dismissKeyboard}
               {...TEXT_INPUT_DONE_PROPS}
             />
@@ -2249,7 +2278,7 @@ function OnboardingScreen({
               style={styles.cleanInput}
               returnKeyType="done"
               blurOnSubmit
-              onFocus={scrollSignupInputIntoView}
+              onFocus={() => scrollSignupInputIntoView(220)}
               onSubmitEditing={dismissKeyboard}
               {...TEXT_INPUT_DONE_PROPS}
             />
@@ -3958,6 +3987,23 @@ const styles = StyleSheet.create({
   },
   onboardingHero: {
     marginBottom: 22
+  },
+  onboardingHeroCompact: {
+    marginBottom: 14,
+    paddingTop: 4
+  },
+  signupCompactTitle: {
+    color: COLORS.black,
+    fontSize: 34,
+    fontWeight: '900',
+    lineHeight: 40,
+    marginBottom: 8
+  },
+  signupCompactSubtitle: {
+    color: COLORS.muted,
+    fontSize: 18,
+    fontWeight: '800',
+    lineHeight: 25
   },
   onboardingDots: {
     flexDirection: 'row',
