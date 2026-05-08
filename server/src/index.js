@@ -25,6 +25,8 @@ const app = express();
 const port = Number(process.env.PORT || 4000);
 const corsOrigin = process.env.CORS_ORIGIN || '*';
 const pendingAiPlans = new Map();
+const MIN_MENU_OPTIONS_PER_MEAL_TYPE = 15;
+const MAX_MENU_OPTIONS = 80;
 
 app.use(cors({ origin: corsOrigin === '*' ? true : corsOrigin }));
 app.use(express.json({ limit: '12mb' }));
@@ -293,7 +295,7 @@ app.post('/api/plan', async (req, res) => {
   const cached = forceFresh ? null : await getCachedPlan(preferences);
   const aiConfigured = Boolean(process.env.OPENAI_API_KEY);
 
-  if (cached && (!aiConfigured || cached.mode === 'ai')) {
+  if (cached && (!aiConfigured || cached.mode === 'ai') && hasEnoughMenuRecipeOptions(cached.plan, preferences)) {
     return res.json(cached);
   }
 
@@ -470,17 +472,22 @@ function hasEnoughCachedMenuRecipes(recipes, preferences) {
 
   for (const mealType of requiredTypes) {
     const count = recipes.filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType).length;
-    const minForType = Math.min(8, Math.max(3, requiredCounts[mealType]));
-    if (count < minForType) return false;
+    if (count < MIN_MENU_OPTIONS_PER_MEAL_TYPE) return false;
   }
 
-  const requiredSlots = Object.values(requiredCounts).reduce((total, count) => total + count, 0);
-  const minTotal = Math.min(25, Math.max(requiredSlots * 2, requiredTypes.length * 6));
+  const minTotal = requiredTypes.length * MIN_MENU_OPTIONS_PER_MEAL_TYPE;
   return recipes.length >= minTotal;
 }
 
 function selectCachedMenuRecipes(recipes, preferences) {
   const requiredTypes = Object.keys(getRequiredMealCounts(preferences));
+  const target = Math.min(
+    MAX_MENU_OPTIONS,
+    Math.max(
+      Number(preferences.recipeOptionTarget || 0),
+      requiredTypes.length * MIN_MENU_OPTIONS_PER_MEAL_TYPE
+    )
+  );
   const grouped = new Map(requiredTypes.map((mealType) => [
     mealType,
     recipes.filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType)
@@ -488,7 +495,7 @@ function selectCachedMenuRecipes(recipes, preferences) {
   const selected = [];
   let cursor = 0;
 
-  while (selected.length < 50) {
+  while (selected.length < target) {
     let added = false;
 
     for (const mealType of requiredTypes) {
@@ -498,14 +505,14 @@ function selectCachedMenuRecipes(recipes, preferences) {
 
       selected.push(recipe);
       added = true;
-      if (selected.length >= 50) break;
+      if (selected.length >= target) break;
     }
 
     if (!added) break;
     cursor += 1;
   }
 
-  return uniqueRecipes(selected).slice(0, 50);
+  return uniqueRecipes(selected).slice(0, target);
 }
 
 function buildRecipeIndexPlan(preferences, recipeLibrary) {
@@ -675,12 +682,124 @@ function getOrStartAiPlan(preferences) {
 }
 
 async function buildAiPlanResponse(preferences) {
-  const aiPlan = attachGroceryEstimate(await generateAiMealPlan(preferences), preferences);
+  const generatedPlan = await generateAiMealPlan(preferences);
+  const completed = await completeMenuRecipeLibrary(generatedPlan, preferences);
+  const aiPlan = attachGroceryEstimate(completed.plan, preferences);
   return {
     plan: aiPlan,
-    warnings: [],
+    warnings: completed.warnings,
     mode: 'ai'
   };
+}
+
+async function completeMenuRecipeLibrary(plan, preferences) {
+  const requiredTypes = getPreferenceMealTypes(preferences);
+  if (!requiredTypes.length) {
+    return { plan, warnings: [] };
+  }
+
+  let recipeLibrary = normalizeMenuOptionKeys(uniqueRecipes(plan.recipeLibrary || []));
+  const warnings = [];
+
+  if (!hasEnoughMenuRecipeOptions({ recipeLibrary }, preferences)) {
+    const cachedRecipes = await getCachedMenuRecipes(preferences);
+    recipeLibrary = normalizeMenuOptionKeys(uniqueRecipes([...recipeLibrary, ...cachedRecipes]));
+  }
+
+  if (!hasEnoughMenuRecipeOptions({ recipeLibrary }, preferences)) {
+    const fallbackPlan = buildMealPlan({
+      ...preferences,
+      recipeOptionTarget: Math.max(
+        Number(preferences.recipeOptionTarget || 0),
+        requiredTypes.length * MIN_MENU_OPTIONS_PER_MEAL_TYPE
+      )
+    });
+    recipeLibrary = normalizeMenuOptionKeys(uniqueRecipes([...recipeLibrary, ...(fallbackPlan.recipeLibrary || [])]));
+    warnings.push('Added extra menu choices so every selected meal type has enough options to browse.');
+  }
+
+  return {
+    plan: {
+      ...plan,
+      recipeLibrary: trimMenuRecipeLibrary(recipeLibrary, preferences)
+    },
+    warnings
+  };
+}
+
+function hasEnoughMenuRecipeOptions(plan = {}, preferences = {}) {
+  const requiredTypes = getPreferenceMealTypes(preferences);
+  if (!requiredTypes.length) return true;
+
+  const library = Array.isArray(plan.recipeLibrary) ? plan.recipeLibrary : [];
+  if (!library.length) return false;
+
+  return requiredTypes.every((mealType) => {
+    const count = library.filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType).length;
+    return count >= MIN_MENU_OPTIONS_PER_MEAL_TYPE;
+  });
+}
+
+function trimMenuRecipeLibrary(recipes = [], preferences = {}) {
+  const requiredTypes = getPreferenceMealTypes(preferences);
+  const target = Math.min(
+    MAX_MENU_OPTIONS,
+    Math.max(
+      Number(preferences.recipeOptionTarget || 0),
+      requiredTypes.length * MIN_MENU_OPTIONS_PER_MEAL_TYPE
+    )
+  );
+
+  if (!requiredTypes.length) return recipes.slice(0, target);
+
+  const grouped = new Map(requiredTypes.map((mealType) => [
+    mealType,
+    recipes.filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType)
+  ]));
+  const selected = [];
+  let cursor = 0;
+
+  while (selected.length < target) {
+    let added = false;
+
+    for (const mealType of requiredTypes) {
+      const recipe = grouped.get(mealType)?.[cursor];
+      if (!recipe) continue;
+      selected.push(recipe);
+      added = true;
+      if (selected.length >= target) break;
+    }
+
+    if (!added) break;
+    cursor += 1;
+  }
+
+  return normalizeMenuOptionKeys(uniqueRecipes(selected.length ? selected : recipes).slice(0, target));
+}
+
+function normalizeMenuOptionKeys(recipes = []) {
+  const seen = new Set();
+
+  return recipes.map((recipe, index) => {
+    const base = String(recipe.optionKey || recipe.id || `${recipe.mealType || 'meal'}-${recipe.name || index + 1}`)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || `recipe-${index + 1}`;
+    let optionKey = base;
+    let suffix = 2;
+
+    while (seen.has(optionKey)) {
+      optionKey = `${base}-${suffix}`;
+      suffix += 1;
+    }
+
+    seen.add(optionKey);
+    return {
+      ...recipe,
+      id: recipe.id || optionKey,
+      optionKey
+    };
+  });
 }
 
 function buildSavedRecipePlanResponse(preferences) {

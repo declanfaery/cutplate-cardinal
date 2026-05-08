@@ -285,7 +285,8 @@ export function normalizePreferences(input = {}) {
 
 function normalizeRecipeOptionTarget(value, days, mealSlotCount) {
   const requested = Number(value);
-  const computed = Math.max(40, Number(days || 0) * Math.max(1, Number(mealSlotCount || 1)) * 3);
+  const mealTypes = Math.max(1, Number(mealSlotCount || 1));
+  const computed = Math.max(40, mealTypes * 15, Number(days || 0) * mealTypes * 3);
   const target = Number.isFinite(requested) && requested > 0 ? requested : computed;
   return Math.min(80, Math.max(25, Math.round(target)));
 }

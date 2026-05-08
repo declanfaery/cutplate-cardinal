@@ -418,7 +418,7 @@ function getMealTypes(preferences, plan) {
 function getTotalTarget(typeCount, preferences = {}) {
   const requested = Number(preferences.recipeOptionTarget || 0);
   if (Number.isFinite(requested) && requested > 0) {
-    return Math.min(80, Math.max(25, Math.round(requested)));
+    return Math.min(80, Math.max(typeCount * 15, 25, Math.round(requested)));
   }
 
   if (typeCount <= 1) return 40;

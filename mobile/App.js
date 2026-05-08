@@ -7,6 +7,7 @@ import {
   Image,
   InputAccessoryView,
   Keyboard,
+  KeyboardAvoidingView,
   Linking,
   Platform,
   Pressable,
@@ -1781,7 +1782,8 @@ function getCookedDailyCalorieTarget(calorieTarget, mealCount, servingsPerMeal) 
 
 function getRecipeOptionTarget(days, mealCount) {
   const totalSlots = Math.max(1, Number(days || 0) * Math.max(1, Number(mealCount || 1)));
-  return Math.min(80, Math.max(40, totalSlots * 3));
+  const perMealTypeMinimum = Math.max(1, Number(mealCount || 1)) * 15;
+  return Math.min(80, Math.max(40, perMealTypeMinimum, totalSlots * 3));
 }
 
 function formatCalorieTargetSummary(calorieTarget, mealCount, servingsPerMeal) {
@@ -2171,14 +2173,27 @@ function OnboardingScreen({
 }) {
   const isSignup = slideIndex >= ONBOARDING_SLIDES.length;
   const slide = ONBOARDING_SLIDES[Math.min(slideIndex, ONBOARDING_SLIDES.length - 1)];
+  const onboardingScrollRef = useRef(null);
+  const scrollSignupInputIntoView = () => {
+    if (!isSignup) return;
+    setTimeout(() => {
+      onboardingScrollRef.current?.scrollToEnd({ animated: true });
+    }, 120);
+  };
 
   return (
-    <ScrollView
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode={KEYBOARD_DISMISS_MODE}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={styles.onboardingScroll}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={styles.keyboardAvoidingScreen}
     >
+      <ScrollView
+        ref={onboardingScrollRef}
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={KEYBOARD_DISMISS_MODE}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.onboardingScroll, isSignup && styles.onboardingScrollSignup]}
+      >
       <View style={styles.onboardingHero}>
         <CardinalMascot active compact />
         <Text style={styles.homeTitle}>{isSignup ? 'Create your profile.' : slide.title}</Text>
@@ -2218,6 +2233,7 @@ function OnboardingScreen({
               style={styles.cleanInput}
               returnKeyType="done"
               blurOnSubmit
+              onFocus={scrollSignupInputIntoView}
               onSubmitEditing={dismissKeyboard}
               {...TEXT_INPUT_DONE_PROPS}
             />
@@ -2233,6 +2249,7 @@ function OnboardingScreen({
               style={styles.cleanInput}
               returnKeyType="done"
               blurOnSubmit
+              onFocus={scrollSignupInputIntoView}
               onSubmitEditing={dismissKeyboard}
               {...TEXT_INPUT_DONE_PROPS}
             />
@@ -2248,7 +2265,8 @@ function OnboardingScreen({
           </Pressable>
         </View>
       )}
-    </ScrollView>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -3931,6 +3949,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     paddingTop: 24,
     paddingBottom: 86
+  },
+  onboardingScrollSignup: {
+    paddingBottom: 260
+  },
+  keyboardAvoidingScreen: {
+    flex: 1
   },
   onboardingHero: {
     marginBottom: 22

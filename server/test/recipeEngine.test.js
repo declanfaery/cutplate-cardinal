@@ -77,10 +77,50 @@ test('builds a large selectable recipe library with varied per-meal calories', (
   const lunchCalories = new Set(lunchOptions.map((meal) => meal.macros.calories));
   const optionNames = new Set(plan.recipeLibrary.map((meal) => meal.name));
 
-  assert.ok(lunchOptions.length >= 10);
+  for (const mealType of ['Breakfast', 'Lunch', 'Dinner', 'Snack']) {
+    assert.ok(
+      plan.recipeLibrary.filter((meal) => meal.mealType === mealType).length >= 15,
+      `${mealType} should have at least 15 choices`
+    );
+  }
+  assert.ok(lunchOptions.length >= 15);
   assert.ok(lunchCalories.size > 4);
   assert.equal(optionNames.size, plan.recipeLibrary.length);
   assert.ok(lunchOptions.every((meal) => meal.macros.calories >= 380 && meal.macros.calories <= 620));
+});
+
+test('normalizes recipe option targets to cover longer menu selection flows', () => {
+  const fiveDayPreferences = normalizePreferences({
+    days: 5,
+    mealSlots: [
+      { type: 'Breakfast', time: '8:00 AM' },
+      { type: 'Lunch', time: '12:30 PM' },
+      { type: 'Dinner', time: '6:30 PM' }
+    ]
+  });
+  const sevenDayPreferences = normalizePreferences({
+    days: 7,
+    mealSlots: [
+      { type: 'Breakfast', time: '8:00 AM' },
+      { type: 'Lunch', time: '12:30 PM' },
+      { type: 'Dinner', time: '6:30 PM' }
+    ]
+  });
+
+  assert.equal(fiveDayPreferences.recipeOptionTarget, 45);
+  assert.equal(sevenDayPreferences.recipeOptionTarget, 63);
+
+  const plan = buildMealPlan({
+    ...fiveDayPreferences,
+    proteins: ['Chicken', 'Turkey', 'Salmon']
+  });
+
+  for (const mealType of ['Breakfast', 'Lunch', 'Dinner']) {
+    assert.ok(
+      plan.recipeLibrary.filter((meal) => meal.mealType === mealType).length >= 15,
+      `${mealType} should have at least 15 choices`
+    );
+  }
 });
 
 test('budget changes the generated recipe library mix', () => {
