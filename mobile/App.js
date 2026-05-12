@@ -61,7 +61,7 @@ const COLORS = {
 };
 
 const DAY_OPTIONS = [3, 5, 7, 10];
-const PROTEIN_OPTIONS = ['Chicken', 'Turkey', 'Salmon', 'Shrimp', 'Beef', 'Eggs', 'Tofu', 'Greek yogurt'];
+const PROTEIN_OPTIONS = ['Chicken', 'Turkey', 'Pork', 'Salmon', 'Shrimp', 'Beef', 'Eggs', 'Tofu', 'Greek yogurt'];
 const ALLERGY_OPTIONS = [
   'Shellfish',
   'Fish',

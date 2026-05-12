@@ -364,6 +364,8 @@ function toBudgetProtein(protein) {
   const value = String(protein || '').toLowerCase();
   if (value.includes('beef') || value.includes('steak')) return 'Lean Ground Beef';
   if (value.includes('turkey')) return '93% Lean Ground Turkey';
+  if (value.includes('sausage')) return 'Lean Chicken Sausage';
+  if (value.includes('pork')) return 'Lean Pork Tenderloin';
   if (value.includes('chicken')) return 'Chicken Thighs';
   if (value.includes('salmon')) return 'Canned Tuna';
   if (value.includes('shrimp')) return 'Eggs and Egg Whites';
@@ -377,6 +379,7 @@ function toOccasionalPremiumProtein(protein) {
   const value = String(protein || '').toLowerCase();
   if (value.includes('salmon')) return 'Salmon';
   if (value.includes('shrimp')) return 'Shrimp';
+  if (value.includes('pork')) return 'Lean Pork Tenderloin';
   return '';
 }
 
@@ -384,6 +387,8 @@ function toStandardProtein(protein) {
   const value = String(protein || '').toLowerCase();
   if (value.includes('beef')) return 'Lean Beef';
   if (value.includes('turkey')) return '93% Lean Ground Turkey';
+  if (value.includes('sausage')) return 'Lean Chicken Sausage';
+  if (value.includes('pork')) return 'Lean Pork Tenderloin';
   if (value.includes('chicken')) return 'Chicken Breast';
   return cleanProteinName(protein);
 }
@@ -392,6 +397,8 @@ function toPremiumProtein(protein) {
   const value = String(protein || '').toLowerCase();
   if (value.includes('beef')) return 'Sirloin Steak';
   if (value.includes('turkey')) return '93% Lean Ground Turkey';
+  if (value.includes('sausage')) return 'Lean Chicken Sausage';
+  if (value.includes('pork')) return 'Pork Tenderloin';
   if (value.includes('chicken')) return 'Chicken Breast';
   return cleanProteinName(protein);
 }
@@ -408,20 +415,22 @@ function rankProteinForTier(protein, tier) {
     if (value.includes('steak') || value.includes('sirloin')) return 0;
     if (value.includes('salmon')) return 1;
     if (value.includes('shrimp')) return 2;
-    if (value.includes('chicken')) return 3;
-    if (value.includes('turkey')) return 4;
-    if (value.includes('greek yogurt') || value.includes('yogurt')) return 5;
-    if (value.includes('egg')) return 6;
-    return 7;
+    if (value.includes('pork')) return 3;
+    if (value.includes('chicken')) return 4;
+    if (value.includes('turkey') || value.includes('sausage')) return 5;
+    if (value.includes('greek yogurt') || value.includes('yogurt')) return 6;
+    if (value.includes('egg')) return 7;
+    return 8;
   }
 
   if (value.includes('chicken')) return 0;
   if (value.includes('turkey')) return 1;
-  if (value.includes('beef')) return 2;
-  if (value.includes('salmon')) return 3;
-  if (value.includes('greek yogurt') || value.includes('yogurt')) return 4;
-  if (value.includes('egg')) return 5;
-  return 6;
+  if (value.includes('pork') || value.includes('sausage')) return 2;
+  if (value.includes('beef')) return 3;
+  if (value.includes('salmon')) return 4;
+  if (value.includes('greek yogurt') || value.includes('yogurt')) return 5;
+  if (value.includes('egg')) return 6;
+  return 7;
 }
 
 function getMealTypes(preferences, plan) {

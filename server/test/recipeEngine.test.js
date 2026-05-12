@@ -283,3 +283,56 @@ test('explicit meat ounces are not multiplied into impossible fillet counts', ()
   assert.equal(salmon.quantityLabel, '1 pack (~1 lb, 2-3 fillets; need ~1 lb)');
   assert.equal(chicken.quantityLabel, '1 tray (~2 lb, 3-4 breasts; need ~12 oz)');
 });
+
+test('normalizes pork, sausage, and parenthetical grocery measurements', () => {
+  const plan = buildMealPlan({
+    days: 3,
+    proteins: ['Pork', 'Sausage'],
+    mealSlots: [{ type: 'Dinner', time: '6:30 PM' }],
+    servingsPerMeal: 2
+  });
+
+  const porkOption = plan.recipeLibrary.find((meal) => /pork/i.test(meal.protein));
+  assert.ok(porkOption);
+
+  const estimate = estimateGroceryCost(
+    {
+      preferences: { servingsPerMeal: 2 },
+      days: [
+        {
+          meals: [
+            {
+              ingredients: [
+                'sausage',
+                'Olive oil (1 tbsp)',
+                '1 tsp olive oil',
+                'Onion (1 small, sliced)',
+                'Soy sauce (1 tbsp)',
+                'Water or broth (120 ml)',
+                'Sesame seeds (1 tsp)',
+                'cup couscous'
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    { servingsPerMeal: 2 }
+  );
+
+  const names = estimate.lineItems.map((item) => item.name);
+  const oliveOil = estimate.lineItems.filter((item) => item.name === 'Olive oil');
+  const sausage = estimate.lineItems.find((item) => item.name === 'Lean sausage');
+  const couscous = estimate.lineItems.find((item) => item.name === 'Rice, pasta, grains, or potatoes');
+
+  assert.equal(oliveOil.length, 1);
+  assert.ok(sausage);
+  assert.ok(couscous);
+  assert.match(sausage.quantityLabel, /pack/);
+  assert.match(couscous.quantityLabel, /need 2 cups/);
+  assert.ok(names.includes('Soy sauce'));
+  assert.ok(names.includes('Broth or stock'));
+  assert.ok(names.includes('Sesame seeds'));
+  assert.ok(names.includes('Onions'));
+  assert.ok(!names.some((name) => /\(|\bcup couscous\b/i.test(name)));
+});

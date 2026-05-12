@@ -11,6 +11,8 @@ const DEFAULT_MEAL_SLOTS = [
 const KNOWN_PROTEINS = {
   chicken: { label: 'Chicken Breast', calories: 185, protein: 38, carbs: 0, fat: 4 },
   turkey: { label: '93% Lean Ground Turkey', calories: 205, protein: 36, carbs: 0, fat: 7 },
+  pork: { label: 'Lean Pork Tenderloin', calories: 210, protein: 36, carbs: 0, fat: 7 },
+  sausage: { label: 'Lean Chicken Sausage', calories: 190, protein: 28, carbs: 2, fat: 9 },
   beef: { label: '96 Percent Lean Beef', calories: 220, protein: 34, carbs: 0, fat: 9 },
   salmon: { label: 'Salmon', calories: 280, protein: 34, carbs: 0, fat: 15 },
   tuna: { label: 'Tuna', calories: 150, protein: 33, carbs: 0, fat: 2 },

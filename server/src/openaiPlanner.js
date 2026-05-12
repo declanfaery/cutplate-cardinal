@@ -226,7 +226,7 @@ export async function analyzePantryImage(input = {}) {
           {
             type: 'input_text',
             text:
-              'You identify visible pantry, fridge, freezer, and countertop food items from a user photo for a meal-planning app. Return only items that are reasonably visible or strongly implied by readable packaging. Do not invent hidden ingredients. Keep names grocery-friendly, concise, and singular where possible. The proteins array is only for true primary proteins such as chicken, turkey, beef, pork, fish, seafood, eggs, tofu, tempeh, beans, lentils, Greek yogurt, or cottage cheese. Never classify protein pasta, boxed macaroni, cheese sauce, snack foods, or tomato sauce as proteins.'
+              'You identify visible pantry, fridge, freezer, and countertop food items from a user photo for a meal-planning app. Return only items that are reasonably visible or strongly implied by readable packaging. Do not invent hidden ingredients. Keep names grocery-friendly, concise, and singular where possible. The proteins array is only for true primary proteins such as chicken, turkey, beef, pork, sausage, fish, seafood, eggs, tofu, tempeh, beans, lentils, Greek yogurt, or cottage cheese. Never classify protein pasta, boxed macaroni, cheese sauce, snack foods, or tomato sauce as proteins.'
           }
         ]
       },
@@ -553,7 +553,7 @@ function cleanDetectedIngredientName(value = '') {
 }
 
 function filterProteinNames(items = []) {
-  const allowedProteinPattern = /\b(chicken|turkey|beef|steak|pork|fish|salmon|tuna|tilapia|cod|shrimp|seafood|egg|eggs|tofu|tempeh|beans?|lentils?|chickpeas?|greek yogurt|cottage cheese)\b/i;
+  const allowedProteinPattern = /\b(chicken|turkey|beef|steak|pork|sausage|fish|salmon|tuna|tilapia|cod|shrimp|seafood|egg|eggs|tofu|tempeh|beans?|lentils?|chickpeas?|greek yogurt|cottage cheese)\b/i;
   const blockedProteinPattern = /\b(protein pasta|protein penne|penne|pasta|macaroni|shells|cheddar|cheese sauce|four cheese|tomato sauce|marinara|pretzel|popcorn|chips?|crackers?)\b/i;
 
   return items.filter((item) => allowedProteinPattern.test(item) && !blockedProteinPattern.test(item));
