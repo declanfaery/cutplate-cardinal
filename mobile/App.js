@@ -583,7 +583,7 @@ export default function App() {
           forceFresh: append,
           excludeRecipeNames: append ? pantryRecipes.map((recipe) => recipe.name).filter(Boolean) : []
         })
-      }, 1);
+      }, append ? 5 : 2);
 
       if (!response.ok) {
         throw new Error(await readApiError(response));
@@ -607,7 +607,11 @@ export default function App() {
       }
       setPantryStep(2);
     } catch (requestError) {
-      setPantrySearchError(formatApiFailure('Could not build pantry meals', requestError));
+      if (append && isNetworkFailure(requestError)) {
+        setPantrySearchNote('The connection paused while I was finding more. Your current recipes are still here, and tapping Find more recipes again will continue from them.');
+      } else {
+        setPantrySearchError(formatApiFailure('Could not build pantry meals', requestError));
+      }
     } finally {
       setIsPantrySearching(false);
     }
@@ -939,7 +943,7 @@ export default function App() {
           forceFresh: true,
           excludeRecipeNames: currentOptions
         })
-      }, 1);
+      }, 5);
 
       if (!response.ok) {
         throw new Error(await readApiError(response));
@@ -961,7 +965,11 @@ export default function App() {
       });
       setWarnings((current) => [...new Set([...current, ...(data.warnings || [])])]);
     } catch (requestError) {
-      setError(formatApiFailure('Could not find more recipe options', requestError));
+      if (isNetworkFailure(requestError)) {
+        setError('The connection paused while I was finding more recipes. Your current picks are still saved, and tapping Find more again will continue from them.');
+      } else {
+        setError(formatApiFailure('Could not find more recipe options', requestError));
+      }
     } finally {
       setIsFindingMoreMenu(false);
     }
@@ -1449,11 +1457,15 @@ async function fetchWithRetry(url, options = {}, retries = 2) {
     } catch (error) {
       lastError = error;
       if (attempt === retries) break;
-      await wait(700 * (attempt + 1));
+      await wait(getRetryDelay(attempt));
     }
   }
 
   throw lastError;
+}
+
+function getRetryDelay(attempt) {
+  return Math.min(1200 * (2 ** attempt), 12000);
 }
 
 function wait(ms) {
@@ -1499,13 +1511,21 @@ async function saveStoredJson(key, value) {
 
 function formatApiFailure(prefix, error) {
   const message = String(error?.message || error || '').trim();
-  const networkFailure = /failed to fetch|network request failed|load failed/i.test(message);
 
-  if (networkFailure) {
-    return `Could not reach the API at ${API_URL}. Start the server and try again.`;
+  if (isNetworkFailure(error)) {
+    if (/localhost|127\.0\.0\.1|10\.0\.2\.2/i.test(API_URL)) {
+      return `Could not reach the API at ${API_URL}. Start the server and try again.`;
+    }
+
+    return `${prefix}: the connection dropped while CutPlate was still working. Your current choices are saved; try again and I will continue from them.`;
   }
 
   return `${prefix}: ${message || 'unknown API error'}.`;
+}
+
+function isNetworkFailure(error) {
+  const message = String(error?.message || error || '').trim();
+  return /failed to fetch|network request failed|load failed|networkerror|aborted/i.test(message);
 }
 
 function getMealOptions(plan, cachedRecipes = [], pantryIngredients = '') {

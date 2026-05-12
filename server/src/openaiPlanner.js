@@ -149,7 +149,7 @@ export async function generateAiMealPlan(input = {}) {
           {
             type: 'input_text',
             text:
-              `You create original, health-focused weight-loss meal plans. ${discoveryInstruction} Return only valid JSON matching the schema. Macro numbers must be realistic per-serving estimates, not full-recipe totals and not medical claims. The calorieTarget preference means target calories per meal for one serving, not a daily calorie target. servingsPerMeal affects ingredient quantities and grocery cost, but macros in the response must remain per-serving. Never put serving counts in recipe names. Respect the user grocery budget by using cheaper staples for low budgets and more premium proteins only when the budget allows it. Name turkey as 93% lean ground turkey unless the user explicitly asks for another cut. Use human-readable creator/source labels without @ handles in app output. Use Fahrenheit for all cooking temperatures.`
+              `You create original, health-focused weight-loss meal plans. ${discoveryInstruction} Return only valid JSON matching the schema. Macro numbers must be realistic per-serving estimates, not full-recipe totals and not medical claims. The calorieTarget preference means target calories per meal for one serving, not a daily calorie target. servingsPerMeal affects ingredient quantities and grocery cost, but macros in the response must remain per-serving. Never put serving counts in recipe names. Respect the user grocery budget by using cheaper staples for low budgets and more premium proteins only when the budget allows it. Name turkey as 93% lean ground turkey unless the user explicitly asks for another cut. Use human-readable creator/source labels without @ handles in app output. Avoid starting recipe names with generic flavor prefixes like Smoky, Smokey, Citrus, Lime Chili, or Garlic Herb. Use Fahrenheit for all cooking temperatures.`
           }
         ]
       },
@@ -161,7 +161,7 @@ export async function generateAiMealPlan(input = {}) {
             text: JSON.stringify(
               {
                 task:
-                  'Create a complete meal plan and a selectable recipeLibrary with exactly preferences.recipeOptionTarget sourced recipe options when possible. Use web-discovered recipes and public recipe/social inspiration as source material, then summarize/adapt in original words. Do not create repeated template names like Lime Chili Protein Bowl or Garlic Herb Protein Plate. Recipe names should reflect the actual food and source concept. Do not return recipes named in preferences.excludeRecipeNames. Use source nutrition/macros when available; otherwise estimate per-serving macros from ingredient amounts. Do not use the same calorie number for every recipe. Use calorieTarget as the per-meal target for one serving. dailyCalorieTarget is calorieTarget multiplied by selected meals per day, and cookedDailyCalorieTarget is further multiplied by servingsPerMeal; use those derived values only for planning scale, not for per-serving macro output. Use the groceryBudget preference before choosing recipes. Treat the budget as the full selected menu budget, then divide by days * selected meal slots to reason about budget per recipe. Low budgets should lean on lower-cost real recipes and staples. Higher budgets can include premium recipes like steak, salmon, shrimp, quinoa, and higher-cost vegetables. If pantryIngredients are provided, prefer recipes that naturally use those ingredients without forcing them into every meal. List every seasoning and sauce as its own measured ingredient using tbsp or tsp. Do not use vague ingredients like seasonings, spices, or sauce to taste. Use Fahrenheit for all cooking temperatures.',
+                  'Create a complete meal plan and a selectable recipeLibrary with exactly preferences.recipeOptionTarget sourced recipe options when possible. Use web-discovered recipes and public recipe/social inspiration as source material, then summarize/adapt in original words. Do not create repeated template names like Lime Chili Protein Bowl or Garlic Herb Protein Plate. Avoid recipe names that start with generic flavor words such as Smoky, Smokey, or Citrus. Recipe names should reflect the actual food and source concept. Do not return recipes named in preferences.excludeRecipeNames. Use source nutrition/macros when available; otherwise estimate per-serving macros from ingredient amounts. Do not use the same calorie number for every recipe. Use calorieTarget as the per-meal target for one serving. dailyCalorieTarget is calorieTarget multiplied by selected meals per day, and cookedDailyCalorieTarget is further multiplied by servingsPerMeal; use those derived values only for planning scale, not for per-serving macro output. Use the groceryBudget preference before choosing recipes. Treat the budget as the full selected menu budget, then divide by days * selected meal slots to reason about budget per recipe. Low budgets should lean on lower-cost real recipes and staples. Higher budgets can include premium recipes like steak, salmon, shrimp, quinoa, and higher-cost vegetables. If pantryIngredients are provided, prefer recipes that naturally use those ingredients without forcing them into every meal. List every seasoning and sauce as its own measured ingredient using tbsp or tsp. Do not use vague ingredients like seasonings, spices, or sauce to taste. Use Fahrenheit for all cooking temperatures.',
                 preferences,
                 sourceSeeds,
                 sourcePolicy: SOURCE_POLICY_NOTES,
@@ -363,6 +363,7 @@ export function normalizeGeneratedRecipe(recipe = {}, index, mealType) {
     optionKey: recipe.optionKey || id,
     mealType: recipe.mealType || mealType,
     time: recipe.time || defaultTime(mealType),
+    name: cleanRecipeTitle(recipe.name, `Recipe ${index + 1}`),
     macroRating: normalizeMacroRating(recipe.macroRating),
     ingredients: Array.isArray(recipe.ingredients)
       ? normalizeIngredientLines(recipe.ingredients)
@@ -374,6 +375,14 @@ export function normalizeGeneratedRecipe(recipe = {}, index, mealType) {
       ? recipe.sources.filter((source) => source?.url && source?.label).slice(0, 3)
       : []
   };
+}
+
+function cleanRecipeTitle(value = '', fallback = 'Recipe') {
+  const title = String(value || '').trim() || fallback;
+  return title
+    .replace(/^(smoky|smokey|citrus)\s*[-:–—]?\s+/i, '')
+    .replace(/\s+/g, ' ')
+    .trim() || fallback;
 }
 
 function normalizeGeneratedPlan(plan = {}) {

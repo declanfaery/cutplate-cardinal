@@ -118,33 +118,48 @@ const FLAVOR_VARIATIONS = [
     finish: 'Finish with lime juice and the measured seasonings.'
   },
   {
-    prefix: 'Smoky ',
-    lead: 'Smoky spices give this version extra flavor while keeping the calories controlled.',
+    prefix: '',
+    lead: 'Paprika, lime, and garlic give this version extra flavor while keeping the calories controlled.',
     ingredients: ['1 tsp smoked paprika', '1/2 tsp garlic powder', '1 tbsp lime juice', '1/4 tsp kosher salt', '1/4 tsp black pepper'],
     snackIngredients: ['1/2 tsp smoked paprika', '1/4 tsp garlic powder'],
     finish: 'Finish with smoked paprika, lime juice, garlic powder, salt, and pepper.'
   },
   {
-    prefix: 'Citrus ',
-    lead: 'Citrus and herbs keep this version bright, fresh, and meal-prep friendly.',
+    prefix: '',
+    lead: 'Lemon and herbs keep this version bright, fresh, and meal-prep friendly.',
     ingredients: ['1 tbsp lemon juice', '1 tsp dried parsley', '1/4 tsp garlic powder', '1/4 tsp kosher salt', '1/4 tsp black pepper'],
     snackIngredients: ['1 tsp lemon juice', '1/2 tsp cinnamon'],
     finish: 'Finish with lemon juice, dried parsley, garlic powder, salt, and pepper.'
   },
   {
-    prefix: 'Buffalo ',
+    prefix: '',
     lead: 'Buffalo-style seasoning makes this version bold without turning it into a heavy meal.',
     ingredients: ['1 tbsp hot sauce', '1 tbsp Greek yogurt sauce', '1/2 tsp garlic powder', '1/4 tsp black pepper'],
     snackIngredients: ['1 tbsp hot sauce', '1/4 tsp garlic powder'],
     finish: 'Finish with hot sauce, Greek yogurt sauce, garlic powder, and pepper.'
   },
   {
-    prefix: 'Garlic Herb ',
+    prefix: '',
     lead: 'Garlic and herbs make this version savory, simple, and easy to repeat.',
     ingredients: ['1 tbsp lemon juice', '1 tsp Italian seasoning', '1/2 tsp garlic powder', '1/4 tsp kosher salt', '1/4 tsp black pepper'],
     snackIngredients: ['1/2 tsp Italian seasoning', '1/4 tsp garlic powder'],
     finish: 'Finish with lemon juice, Italian seasoning, garlic powder, salt, and pepper.'
   }
+];
+
+const NAME_FINISHES = [
+  '',
+  'with Paprika Lime',
+  'with Lemon Herbs',
+  'with Buffalo Yogurt Sauce',
+  'with Garlic Herb Sauce',
+  'with Salsa Verde',
+  'with Ginger Soy',
+  'with Tomato Basil',
+  'with BBQ Slaw',
+  'with Pesto Greens',
+  'with Fajita Vegetables',
+  'with Dill Yogurt Sauce'
 ];
 
 export function attachRecipeLibrary(plan, preferences = plan.preferences || {}) {
@@ -174,7 +189,7 @@ function buildOption({ mealType, index, preferences, plan }) {
   const slot = (preferences.mealSlots || []).find((mealSlot) => mealSlot.type === mealType);
   const sources = getSourceSeeds(preferences.sourceHandles).slice(0, 2);
   const macros = buildMacros(mealType, index, protein, preferences);
-  const name = `${variation.prefix}${cleanProteinName(protein)} ${format}`;
+  const name = buildLibraryRecipeName(cleanProteinName(protein), format, index, formats.length);
   const ingredients = buildIngredients(mealType, protein, index, variation, preferences);
 
   return {
@@ -206,6 +221,12 @@ function buildOption({ mealType, index, preferences, plan }) {
       sourceHandles: preferences.sourceHandles
     })
   };
+}
+
+function buildLibraryRecipeName(protein, format, index, formatCount) {
+  const cycle = Math.floor(index / Math.max(1, formatCount));
+  const finish = NAME_FINISHES[cycle % NAME_FINISHES.length];
+  return [protein, format, finish].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 }
 
 function buildMacros(mealType, index, protein, preferences = {}) {
