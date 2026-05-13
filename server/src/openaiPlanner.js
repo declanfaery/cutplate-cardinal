@@ -149,7 +149,7 @@ export async function generateAiMealPlan(input = {}) {
           {
             type: 'input_text',
             text:
-              `You create original, health-focused weight-loss meal plans. ${discoveryInstruction} Return only valid JSON matching the schema. Macro numbers must be realistic per-serving estimates, not full-recipe totals and not medical claims. The calorieTarget preference means target calories per meal for one serving, not a daily calorie target. servingsPerMeal affects ingredient quantities and grocery cost, but macros in the response must remain per-serving. Never put serving counts in recipe names. Respect the user grocery budget by using cheaper staples for low budgets and more premium proteins only when the budget allows it. Name turkey as 93% lean ground turkey unless the user explicitly asks for another cut. Use human-readable creator/source labels without @ handles in app output. Avoid starting recipe names with generic flavor prefixes like Smoky, Smokey, Citrus, Lime Chili, or Garlic Herb. Use Fahrenheit for all cooking temperatures.`
+              `You create original, health-focused weight-loss meal plans. ${discoveryInstruction} Return only valid JSON matching the schema. Macro numbers must be realistic per-serving estimates, not full-recipe totals and not medical claims. The calorieTarget preference means target calories per meal for one serving, not a daily calorie target. servingsPerMeal affects ingredient quantities and grocery cost, but macros in the response must remain per-serving. Never put serving counts in recipe names. Respect the user grocery budget by using cheaper staples for low budgets and more premium proteins only when the budget allows it. Name turkey as 93% lean ground turkey unless the user explicitly asks for another cut. Use human-readable creator/source labels without @ handles in app output. Avoid starting recipe names with generic flavor prefixes like Smoky, Smokey, Citrus, Lime Chili, or Garlic Herb. Use Fahrenheit for all cooking temperatures. Recipe steps must be complete, cookable directions: usually 5-10 steps with prep, heat level, timing or visual cues, finishing, and food-safe temperatures where relevant. Do not collapse directions into vague summaries like "cook until done" or "serve over rice."`
           }
         ]
       },
@@ -161,7 +161,7 @@ export async function generateAiMealPlan(input = {}) {
             text: JSON.stringify(
               {
                 task:
-                  'Create a complete meal plan and a selectable recipeLibrary with exactly preferences.recipeOptionTarget sourced recipe options when possible. Use web-discovered recipes and public recipe/social inspiration as source material, then summarize/adapt in original words. Do not create repeated template names like Lime Chili Protein Bowl or Garlic Herb Protein Plate. Avoid recipe names that start with generic flavor words such as Smoky, Smokey, or Citrus. Recipe names should reflect the actual food and source concept. Do not return recipes named in preferences.excludeRecipeNames. Use source nutrition/macros when available; otherwise estimate per-serving macros from ingredient amounts. Do not use the same calorie number for every recipe. Use calorieTarget as the per-meal target for one serving. dailyCalorieTarget is calorieTarget multiplied by selected meals per day, and cookedDailyCalorieTarget is further multiplied by servingsPerMeal; use those derived values only for planning scale, not for per-serving macro output. Use the groceryBudget preference before choosing recipes. Treat the budget as the full selected menu budget, then divide by days * selected meal slots to reason about budget per recipe. Low budgets should lean on lower-cost real recipes and staples. Higher budgets can include premium recipes like steak, salmon, shrimp, quinoa, and higher-cost vegetables. If pantryIngredients are provided, prefer recipes that naturally use those ingredients without forcing them into every meal. List every seasoning and sauce as its own measured ingredient using tbsp or tsp. Do not use vague ingredients like seasonings, spices, or sauce to taste. Use Fahrenheit for all cooking temperatures.',
+                  'Create a complete meal plan and a selectable recipeLibrary with exactly preferences.recipeOptionTarget sourced recipe options when possible. Use web-discovered recipes and public recipe/social inspiration as source material, then summarize/adapt in original words. Do not create repeated template names like Lime Chili Protein Bowl or Garlic Herb Protein Plate. Avoid recipe names that start with generic flavor words such as Smoky, Smokey, or Citrus. Recipe names should reflect the actual food and source concept. Do not return recipes named in preferences.excludeRecipeNames. Use source nutrition/macros when available; otherwise estimate per-serving macros from ingredient amounts. Do not use the same calorie number for every recipe. Use calorieTarget as the per-meal target for one serving. dailyCalorieTarget is calorieTarget multiplied by selected meals per day, and cookedDailyCalorieTarget is further multiplied by servingsPerMeal; use those derived values only for planning scale, not for per-serving macro output. Use the groceryBudget preference before choosing recipes. Treat the budget as the full selected menu budget, then divide by days * selected meal slots to reason about budget per recipe. Low budgets should lean on lower-cost real recipes and staples. Higher budgets can include premium recipes like steak, salmon, shrimp, quinoa, and higher-cost vegetables. If pantryIngredients are provided, prefer recipes that naturally use those ingredients without forcing them into every meal. List every seasoning and sauce as its own measured ingredient using tbsp or tsp. Do not use vague ingredients like seasonings, spices, or sauce to taste. Use Fahrenheit for all cooking temperatures. Return source-faithful, fully cookable steps rewritten in original words. Each recipe should usually have 5-10 steps and include pan/oven/air-fryer temperature, time, cues like browned/thickened/wilted, rest or serving instructions, and 165 F poultry safety when relevant. Do not return three-step summaries.',
                 preferences,
                 sourceSeeds,
                 sourcePolicy: SOURCE_POLICY_NOTES,
@@ -300,7 +300,7 @@ export async function generateSourcedPantryRecipes(input = {}) {
           {
             type: 'input_text',
             text:
-              'You find real recipe ideas from the public web and selected public social recipe sources, then return original summaries for a pantry-first cooking app. Do not ask the user for permission or say you can start a live web search; do the search now and return recipes. Do not copy recipe pages, captions, or creator text. Every returned recipe must be built primarily around the user pantry ingredients. Optional additions must be small pantry staples only: measured dried spices, herbs, oil, citrus/vinegar, hot sauce, broth/water, salt, or pepper. Do not add specialty dairy, cheese sauces, cream sauces, cottage cheese, fresh cheeses, milk, butter, flour, meat, seafood, or vegetables unless they are visible/typed pantry ingredients. Do not include optional major ingredients outside the pantry list. If the user typed a specific protein cut, such as chicken breast, use that cut and do not swap to ground chicken or another meat. If the pantry includes a boxed mac, cheese sauce, or packaged cheese item, use that exact item only; do not invent extra milk, butter, parmesan, cream, or fresh cheese. For Lunch or Dinner, ignore snack foods like pretzels, popcorn, chips, crackers, and cookies unless the user explicitly selected Snack. Do not mash two unrelated recipes into one dish. A source link must match the same dish family as the returned recipe, not just share one ingredient. Macro numbers must be per serving. The calorieTarget input means target calories for this one meal serving, not a daily target. Return only valid JSON matching the schema.'
+              'You find real recipe ideas from the public web and selected public social recipe sources, then return original summaries for a pantry-first cooking app. Do not ask the user for permission or say you can start a live web search; do the search now and return recipes. Do not copy recipe pages, captions, or creator text. Every returned recipe must be built primarily around the user pantry ingredients. Optional additions must be small pantry staples only: measured dried spices, herbs, oil, citrus/vinegar, hot sauce, broth/water, salt, or pepper. Do not add specialty dairy, cheese sauces, cream sauces, cottage cheese, fresh cheeses, milk, butter, flour, meat, seafood, or vegetables unless they are visible/typed pantry ingredients. Do not include optional major ingredients outside the pantry list. If the user typed a specific protein cut, such as chicken breast, use that cut and do not swap to ground chicken or another meat. If the pantry includes a boxed mac, cheese sauce, or packaged cheese item, use that exact item only; do not invent extra milk, butter, parmesan, cream, or fresh cheese. For Lunch or Dinner, ignore snack foods like pretzels, popcorn, chips, crackers, and cookies unless the user explicitly selected Snack. Do not mash two unrelated recipes into one dish. A source link must match the same dish family as the returned recipe, not just share one ingredient. Macro numbers must be per serving. The calorieTarget input means target calories for this one meal serving, not a daily target. Recipe steps must be source-faithful and cookable, rewritten in original words: usually 5-10 steps with prep, heat level, timing or visual cues, finishing, and food-safe temperatures where relevant. Never return vague three-step summaries. Return only valid JSON matching the schema.'
           }
         ]
       },
@@ -312,7 +312,7 @@ export async function generateSourcedPantryRecipes(input = {}) {
             text: JSON.stringify(
               {
                 task:
-                  'Find and summarize real recipe options for the requested meal type using the provided pantry/fridge ingredients as the core. Use the web search tool now. Return exactly recipeCount different recipes. If exact web matches are sparse, use source-backed dish families and create original pantry-first variants that still obey the ingredient limits. Do not ask whether to proceed. Recipe names should be specific to the source-backed food concept, not generic flavor templates. Do not return recipes named in excludeRecipeNames. Include source links whose recipe concept directly matches each returned dish. For example, do not cite a mac and cheese recipe for a tomato penne recipe, and do not add four-cheese sauce to a tomato pasta unless cheese sauce is in the user pantry ingredients. For dinner/lunch, avoid snack-crusted or novelty snack recipes from pretzels, popcorn, chips, or crackers. Use source nutrition/macros when available; otherwise estimate per-serving macros from the returned ingredient amounts. List seasonings/sauces with tbsp/tsp measurements. Steps should be plain sentences without leading numbers.',
+                  'Find and summarize real recipe options for the requested meal type using the provided pantry/fridge ingredients as the core. Use the web search tool now. Return exactly recipeCount different recipes. If exact web matches are sparse, use source-backed dish families and create original pantry-first variants that still obey the ingredient limits. Do not ask whether to proceed. Recipe names should be specific to the source-backed food concept, not generic flavor templates. Do not return recipes named in excludeRecipeNames. Include source links whose recipe concept directly matches each returned dish. For example, do not cite a mac and cheese recipe for a tomato penne recipe, and do not add four-cheese sauce to a tomato pasta unless cheese sauce is in the user pantry ingredients. For dinner/lunch, avoid snack-crusted or novelty snack recipes from pretzels, popcorn, chips, or crackers. Use source nutrition/macros when available; otherwise estimate per-serving macros from the returned ingredient amounts. List seasonings/sauces with tbsp/tsp measurements. Steps should be plain sentences without leading numbers. Return complete cookable directions, not summaries: usually 5-10 steps that explain prep, cooking vessel, heat level or Fahrenheit temperature, timing, doneness cues, sauce/assembly order, serving, and safe internal temperature for poultry.',
                 recipeCount,
                 mealType,
                 pantryIngredients,
@@ -368,13 +368,30 @@ export function normalizeGeneratedRecipe(recipe = {}, index, mealType) {
     ingredients: Array.isArray(recipe.ingredients)
       ? normalizeIngredientLines(recipe.ingredients)
       : [],
-    steps: Array.isArray(recipe.steps)
-      ? recipe.steps.map(stripLeadingStepNumber).map(convertTemperaturesToFahrenheit).filter(Boolean)
-      : [],
+    steps: Array.isArray(recipe.steps) ? normalizeStepLines(recipe.steps) : [],
     sources: Array.isArray(recipe.sources)
       ? recipe.sources.filter((source) => source?.url && source?.label).slice(0, 3)
       : []
   };
+}
+
+export function hasCookableRecipeSteps(recipe = {}) {
+  const steps = normalizeStepLines(recipe.steps || []);
+  if (steps.length < 5) return false;
+
+  const meaningfulSteps = steps.filter((step) => wordCount(step) >= 7);
+  if (meaningfulSteps.length < Math.min(5, steps.length)) return false;
+
+  const joined = steps.join(' ').toLowerCase();
+  const searchableSteps = joined.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const hasCookingAction = /\b(preheat|bake|air fry|air-fry|sear|saute|simmer|boil|grill|roast|cook|microwave|toast|broil)\b/i.test(searchableSteps);
+  const hasTimingOrCue = /\b(\d+\s*(?:-|to)?\s*\d*\s*(?:minute|minutes|min|hour|hours)|until|golden|browned|thickened|wilted|tender|crisp|melted|reaches|internal)\b/i.test(joined);
+  const hasPrepOrFinish = /\b(season|slice|dice|chop|mix|whisk|stir|combine|toss|assemble|garnish|serve|rest|cool|store|freeze|reheat)\b/i.test(joined);
+
+  if (!hasCookingAction || !hasTimingOrCue || !hasPrepOrFinish) return false;
+
+  const genericStepCount = steps.filter((step) => isGenericSummaryStep(step)).length;
+  return genericStepCount <= 1;
 }
 
 function cleanRecipeTitle(value = '', fallback = 'Recipe') {
@@ -478,14 +495,50 @@ function normalizeMacroRating(value = '') {
   return 'FIT';
 }
 
+function normalizeStepLines(steps = []) {
+  const normalized = [];
+  const seen = new Set();
+
+  for (const step of steps) {
+    const cleaned = convertTemperaturesToFahrenheit(stripLeadingStepNumber(step))
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!cleaned) continue;
+
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(cleaned);
+  }
+
+  return normalized;
+}
+
 function stripLeadingStepNumber(value = '') {
-  return String(value || '').trim().replace(/^\s*\d+[\).]\s*/, '');
+  return String(value || '').trim().replace(/^(\s*\d+[\).]\s*)+/, '');
 }
 
 function convertTemperaturesToFahrenheit(value = '') {
   return String(value || '')
     .replace(/(\d{2,3})\s*(?:°\s*)?C\b/gi, (_, celsius) => `${Math.round(Number(celsius) * 9 / 5 + 32)} F`)
     .replace(/(\d{3})\s*(?:°\s*)?F\b/gi, (_, fahrenheit) => `${fahrenheit} F`);
+}
+
+function wordCount(value = '') {
+  return String(value || '').trim().split(/\s+/).filter(Boolean).length;
+}
+
+function isGenericSummaryStep(value = '') {
+  const step = String(value || '').trim().toLowerCase();
+  return [
+    /^cook .* until (done|cooked|ready)\.?$/,
+    /^cook or warm .* until ready\.?$/,
+    /^prepare the vegetables and carb base\.?$/,
+    /^build the meal in a bowl or plate\.?$/,
+    /^serve over [a-z\s]+\.?$/,
+    /^season and cook .* until (done|cooked)\.?$/,
+    /^finish with .*\.?$/
+  ].some((pattern) => pattern.test(step));
 }
 
 function normalizeRecipeCount(value, fallback = 9) {

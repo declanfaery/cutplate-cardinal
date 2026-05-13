@@ -2,7 +2,12 @@ import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
 import { buildMealPlan, normalizePreferences } from './recipeEngine.js';
-import { analyzePantryImage, generateAiMealPlan, generateSourcedPantryRecipes } from './openaiPlanner.js';
+import {
+  analyzePantryImage,
+  generateAiMealPlan,
+  generateSourcedPantryRecipes,
+  hasCookableRecipeSteps
+} from './openaiPlanner.js';
 import { CREATOR_SOURCES, SOURCE_POLICY_NOTES } from './sources.js';
 import {
   attachGroceryEstimate,
@@ -431,6 +436,7 @@ async function getCachedPantryRecipes({ pantryIngredients, mealType, excludeReci
   return uniqueRecipes(cachedRecipes)
     .filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType)
     .filter((recipe) => !excluded.has(normalizeRecipeIdentity(recipe.name)))
+    .filter((recipe) => hasCookableRecipeSteps(recipe))
     .filter((recipe) => !usesUnsupportedMajorPantryAddition(recipe, pantryTerms))
     .slice(0, limit);
 }
@@ -600,6 +606,7 @@ function filterPantryRecipes(recipes = [], { pantryIngredients = '', mealType, e
   return uniqueRecipes(recipes)
     .filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType)
     .filter((recipe) => !excluded.has(normalizeRecipeIdentity(recipe.name)))
+    .filter((recipe) => hasCookableRecipeSteps(recipe))
     .filter((recipe) => !usesUnsupportedMajorPantryAddition(recipe, pantryTerms));
 }
 
