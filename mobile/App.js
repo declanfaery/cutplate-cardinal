@@ -44,6 +44,7 @@ const API_URL =
     android: 'http://10.0.2.2:4000',
     default: 'http://localhost:4000'
   });
+const APP_VERSION = '1.5.2';
 
 const COLORS = {
   ink: '#060606',
@@ -101,6 +102,7 @@ const ONBOARDING_COMPLETE_STORAGE_KEY = 'cutplate:onboarding-complete:v1';
 const CALENDAR_STORAGE_KEY = 'cutplate:calendar:v1';
 const SHOPPING_LIST_STORAGE_KEY = 'cutplate:shopping-list:v1';
 const SAVED_RECIPES_STORAGE_KEY = 'cutplate:saved-recipes:v1';
+const ANALYTICS_ID_STORAGE_KEY = 'cutplate:analytics-id:v1';
 const KEYBOARD_ACCESSORY_ID = 'cutplate-keyboard-done';
 const KEYBOARD_DISMISS_MODE = Platform.OS === 'ios' ? 'interactive' : 'on-drag';
 const TEXT_INPUT_DONE_PROPS = Platform.OS === 'ios' ? { inputAccessoryViewID: KEYBOARD_ACCESSORY_ID } : {};
@@ -174,7 +176,10 @@ export default function App() {
   const [pantryVisibleRecipeCount, setPantryVisibleRecipeCount] = useState(3);
   const [activeCalendarMeal, setActiveCalendarMeal] = useState(null);
   const [error, setError] = useState('');
+  const [analyticsId, setAnalyticsId] = useState('');
   const pricingRequestId = useRef(0);
+  const analyticsIdRef = useRef('');
+  const hasTrackedAppOpen = useRef(false);
 
   const enabledSlots = useMemo(() => mealSlots.filter((slot) => slot.enabled), [mealSlots]);
   const stepCount = 12;
@@ -205,15 +210,25 @@ export default function App() {
     let cancelled = false;
 
     const boot = async () => {
-      const [storedViewer, storedOnboardingComplete, storedCalendarMeals, storedShoppingPlan, storedSavedRecipes] = await Promise.all([
+      const [
+        storedViewer,
+        storedOnboardingComplete,
+        storedCalendarMeals,
+        storedShoppingPlan,
+        storedSavedRecipes,
+        storedAnalyticsId
+      ] = await Promise.all([
         loadStoredJson(USER_STORAGE_KEY, null),
         loadStoredJson(ONBOARDING_COMPLETE_STORAGE_KEY, false),
         loadStoredJson(CALENDAR_STORAGE_KEY, []),
         loadStoredJson(SHOPPING_LIST_STORAGE_KEY, null),
-        loadStoredJson(SAVED_RECIPES_STORAGE_KEY, [])
+        loadStoredJson(SAVED_RECIPES_STORAGE_KEY, []),
+        getOrCreateAnalyticsId()
       ]);
 
       if (cancelled) return;
+      analyticsIdRef.current = storedAnalyticsId;
+      setAnalyticsId(storedAnalyticsId);
       setViewer(storedViewer);
       setHasCompletedOnboarding(Boolean(storedOnboardingComplete || storedViewer));
       setCalendarMeals(Array.isArray(storedCalendarMeals) ? storedCalendarMeals : []);
@@ -245,7 +260,47 @@ export default function App() {
     return true;
   }, [budgetTarget, enabledSlots.length, selectedProteins.length, step]);
 
+  const trackEvent = async (eventName, properties = {}) => {
+    const anonymousId = analyticsIdRef.current || analyticsId;
+    if (!anonymousId) return;
+    const { analyticsUserId, analyticsEmail, ...eventProperties } = properties || {};
+
+    try {
+      await fetch(`${API_URL}/api/analytics/event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventName,
+          anonymousId,
+          userId: analyticsUserId || viewer?.id || null,
+          email: analyticsEmail || viewer?.email || null,
+          appVersion: APP_VERSION,
+          platform: Platform.OS,
+          properties: eventProperties
+        })
+      });
+    } catch {
+      // Analytics should never block the app experience.
+    }
+  };
+
+  useEffect(() => {
+    if (!hasBooted || !analyticsId || hasTrackedAppOpen.current) return;
+
+    hasTrackedAppOpen.current = true;
+    void trackEvent('app_opened', {
+      hasProfile: Boolean(viewer?.email),
+      calendarMeals: calendarMeals.length,
+      savedRecipes: savedRecipes.length
+    });
+  }, [analyticsId, calendarMeals.length, hasBooted, savedRecipes.length, viewer?.email]);
+
   const startGuidedPlan = () => {
+    void trackEvent('meal_plan_started', {
+      days,
+      mealsPerDay: enabledSlots.length,
+      hasProfile: Boolean(viewer?.email)
+    });
     setError('');
     setPlan(null);
     setSelectedMenuPlan(null);
@@ -255,6 +310,9 @@ export default function App() {
   };
 
   const startPantryFinder = () => {
+    void trackEvent('pantry_started', {
+      hasProfile: Boolean(viewer?.email)
+    });
     setError('');
     setPlan(null);
     setSelectedMenuPlan(null);
@@ -275,6 +333,7 @@ export default function App() {
     setSignupNotice('');
     setHasCompletedOnboarding(true);
     await saveStoredJson(ONBOARDING_COMPLETE_STORAGE_KEY, true);
+    void trackEvent('onboarding_completed', { method: 'guest' });
     setAppMode('home');
   };
 
@@ -331,6 +390,11 @@ export default function App() {
       setViewer(profile);
       setHasCompletedOnboarding(true);
       setSignupNotice(data.emailSent ? 'Confirmation email sent.' : 'Confirmation link created for local testing.');
+      void trackEvent('profile_saved', {
+        analyticsUserId: profile.id,
+        analyticsEmail: profile.email,
+        confirmationPending: !data.user?.confirmedAt
+      });
       setAppMode('home');
     } catch (requestError) {
       setSignupError(formatApiFailure('Could not send the confirmation email', requestError));
@@ -352,6 +416,10 @@ export default function App() {
 
     setSavedRecipes(nextRecipes);
     await saveStoredJson(SAVED_RECIPES_STORAGE_KEY, nextRecipes);
+    void trackEvent('recipe_saved', {
+      name: savedRecipe.name,
+      mealType: savedRecipe.mealType
+    });
   };
 
   const removeSavedRecipe = async (recipe) => {
@@ -394,6 +462,11 @@ export default function App() {
     setSelectedDay(0);
     setWarnings([]);
     setError('');
+    void trackEvent('calendar_plan_added', {
+      meals: meals.length,
+      days: calendarPlan?.days?.length || 0,
+      groceryTotal: shoppingPlan?.groceryEstimate?.estimatedTotal || null
+    });
     setAppMode('home');
   };
 
@@ -415,12 +488,21 @@ export default function App() {
 
     setCalendarMeals(nextMeals);
     await saveStoredJson(CALENDAR_STORAGE_KEY, nextMeals);
+    void trackEvent('calendar_meal_added', {
+      source: 'pantry',
+      name: recipe.name,
+      mealType: recipe.mealType
+    });
     setPantrySearchNote(`${recipe.name} added to ${formatLongDate(date)}.`);
     setPantrySearchError('');
     setAppMode('home');
   };
 
   const viewShoppingList = () => {
+    void trackEvent('grocery_list_viewed', {
+      hasList: Boolean(latestShoppingPlan),
+      itemCount: latestShoppingPlan?.groceryEstimate?.items?.length || 0
+    });
     setError('');
     setAppMode('shopping');
   };
@@ -430,6 +512,7 @@ export default function App() {
     setLatestShoppingPlan(null);
     setActiveCalendarMeal(null);
     await AsyncStorage.multiRemove([CALENDAR_STORAGE_KEY, SHOPPING_LIST_STORAGE_KEY]);
+    void trackEvent('calendar_cleared');
   };
 
   const updatePantryFinderIngredients = (value) => {
@@ -543,9 +626,15 @@ export default function App() {
         setPantrySearchError('I could not detect pantry or fridge ingredients in that photo. Try a clearer cabinet/fridge photo, or type what you have below.');
         setPantrySearchNote(data.note || '');
       }
+      void trackEvent('pantry_photo_scanned', {
+        detectedCount: ingredientNames.length,
+        proteinCount: proteins.length,
+        status: ingredientNames.length ? 'detected' : 'empty'
+      });
     } catch (requestError) {
       setPantryScanStatus('error');
       setPantrySearchError(formatApiFailure('Could not analyze the pantry photo', requestError));
+      void trackEvent('pantry_photo_scanned', { status: 'error' });
     } finally {
       setIsAnalyzingPantryPhoto(false);
     }
@@ -605,6 +694,11 @@ export default function App() {
         setPantryVisibleRecipeCount(3);
         setPantrySearchNote(data.note || '');
       }
+      void trackEvent(append ? 'pantry_recipes_more_generated' : 'pantry_recipes_generated', {
+        count: recipes.length,
+        total: append ? uniqueRecipeList([...pantryRecipes, ...recipes]).length : recipes.length,
+        mealType: pantryMealType
+      });
       setPantryStep(2);
     } catch (requestError) {
       if (append && isNetworkFailure(requestError)) {
@@ -661,6 +755,7 @@ export default function App() {
     setSignupEmail('');
     setSignupError('');
     setSignupNotice('');
+    void trackEvent('account_deleted');
     setAppMode('home');
   };
 
@@ -898,6 +993,12 @@ export default function App() {
       setPlanStage('menu');
       setWarnings(data.warnings || []);
       setSelectedDay(0);
+      void trackEvent('meal_plan_generated', {
+        days,
+        mealsPerDay: enabledSlots.length,
+        mode: data.mode || '',
+        optionCount: data.plan?.recipeLibrary?.length || 0
+      });
     } catch (requestError) {
       setError(formatApiFailure('Plan generation failed', requestError));
     } finally {
@@ -964,6 +1065,10 @@ export default function App() {
         warnings: [...new Set([...(plan.warnings || []), ...(data.warnings || [])])]
       });
       setWarnings((current) => [...new Set([...current, ...(data.warnings || [])])]);
+      void trackEvent('meal_options_more_generated', {
+        added: data.plan?.recipeLibrary?.length || 0,
+        total: nextLibrary.length
+      });
     } catch (requestError) {
       if (isNetworkFailure(requestError)) {
         setError('The connection paused while I was finding more recipes. Your current picks are still saved, and tapping Find more again will continue from them.');
@@ -1027,6 +1132,11 @@ export default function App() {
       setSelectedMenuPlan(data.plan);
       setSelectedDay(0);
       setPlanStage('recipes');
+      void trackEvent('menu_selected', {
+        selectedMeals: selectedMeals.length,
+        totalMeals: data.plan?.summary?.totalMeals || assignedMeals.length,
+        groceryTotal: data.plan?.groceryEstimate?.estimatedTotal || null
+      });
     } catch (requestError) {
       setError(formatApiFailure('Could not estimate the selected menu', requestError));
     } finally {
@@ -1506,6 +1616,19 @@ async function saveStoredJson(key, value) {
     await AsyncStorage.setItem(key, JSON.stringify(value));
   } catch {
     // Local persistence should never block the meal plan flow.
+  }
+}
+
+async function getOrCreateAnalyticsId() {
+  try {
+    const existing = await AsyncStorage.getItem(ANALYTICS_ID_STORAGE_KEY);
+    if (existing) return existing;
+
+    const nextId = `anon-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    await AsyncStorage.setItem(ANALYTICS_ID_STORAGE_KEY, nextId);
+    return nextId;
+  } catch {
+    return `anon-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
 }
 

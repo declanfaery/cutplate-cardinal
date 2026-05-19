@@ -25,6 +25,7 @@ import {
   stampUncachedResponse
 } from './planCache.js';
 import { confirmSignup, createSignup, deleteSignup } from './users.js';
+import { getAnalyticsSettings, trackAnalyticsEvent } from './analytics.js';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -43,6 +44,7 @@ app.get('/api/health', (req, res) => {
     aiReady: Boolean(process.env.OPENAI_API_KEY),
     model: process.env.OPENAI_MODEL || 'gpt-5-nano',
     cache: getCacheSettings(),
+    analytics: getAnalyticsSettings(),
     aiTimeoutMs: getAiTimeoutMs(),
     fastFirst: shouldReturnFastFirst(),
     webSearch: shouldUseWebSearch(),
@@ -98,6 +100,15 @@ app.post('/api/delete-account', async (req, res, next) => {
   try {
     await deleteSignup(req.body?.email);
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/analytics/event', async (req, res, next) => {
+  try {
+    const result = await trackAnalyticsEvent(req.body || {});
+    res.status(201).json(result);
   } catch (error) {
     next(error);
   }
