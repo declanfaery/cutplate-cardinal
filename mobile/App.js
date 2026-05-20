@@ -1295,6 +1295,7 @@ export default function App() {
                 menuPricing={menuPricing}
                 budgetAmount={budgetAmount}
                 budgetRemaining={budgetRemaining}
+                shoppingLocation={shoppingLocation}
                 onFindMoreOptions={findMoreMenuOptions}
                 onContinue={estimateAssignedMenu}
                 isEstimating={isEstimating}
@@ -1441,7 +1442,13 @@ export default function App() {
             {step === 8 ? (
               <LocationStep shoppingLocation={shoppingLocation} setShoppingLocation={setShoppingLocation} />
             ) : null}
-            {step === 9 ? <BudgetPreferenceStep budgetTarget={budgetTarget} setBudgetTarget={setBudgetTarget} /> : null}
+            {step === 9 ? (
+              <BudgetPreferenceStep
+                budgetTarget={budgetTarget}
+                setBudgetTarget={setBudgetTarget}
+                shoppingLocation={shoppingLocation}
+              />
+            ) : null}
             {step === 10 ? (
               <SourcesStep
                 socialSourcesEnabled={sourceHandles.length > 0}
@@ -1969,15 +1976,50 @@ function formatRecipeStep(value = '') {
   return String(value || '').trim().replace(/^\s*\d+[\).]\s*/, '');
 }
 
-function formatMenuCostLabel(meal, selected, costInfo) {
+function getCurrencySymbolFromEstimateOrLocation(estimate, location = '') {
+  if (estimate?.currencySymbol) return estimate.currencySymbol;
+
+  const text = String(location || '').trim();
+  if (
+    /\b(canada|canadian|ontario|quebec|british columbia|alberta|manitoba|saskatchewan|nova scotia|new brunswick|toronto|vancouver|montreal|ottawa|calgary|edmonton)\b|^[A-Z]\d[A-Z]\s?\d[A-Z]\d$/i.test(
+      text
+    )
+  ) {
+    return 'C$';
+  }
+  if (
+    /\b(uk|u\.k\.|united kingdom|england|scotland|wales|northern ireland|london|manchester|birmingham|glasgow|edinburgh|liverpool|bristol|leeds)\b|^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i.test(
+      text
+    )
+  ) {
+    return '\u00a3';
+  }
+  if (
+    /\b(eu|europe|eurozone|ireland|france|germany|spain|italy|netherlands|belgium|portugal|austria|sweden|denmark|finland|poland|dublin|paris|berlin|madrid|rome|amsterdam|brussels|lisbon|vienna|stockholm|copenhagen|helsinki|warsaw)\b/i.test(
+      text
+    )
+  ) {
+    return '\u20ac';
+  }
+
+  return '$';
+}
+
+function formatCurrencyAmount(value, symbol = '$', decimals = 2) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return `${symbol}0${decimals ? '.00' : ''}`;
+  return `${symbol}${amount.toFixed(decimals)}`;
+}
+
+function formatMenuCostLabel(meal, selected, costInfo, currencySymbol = '$') {
   if (selected) return 'In cart';
 
   const addCost = Number(costInfo?.addCost);
   if (Number.isFinite(addCost)) {
-    return addCost < 0.01 ? 'Uses cart' : `Adds $${addCost.toFixed(2)}`;
+    return addCost < 0.01 ? 'Uses cart' : `Adds ${formatCurrencyAmount(addCost, currencySymbol)}`;
   }
 
-  return `Adds $${Number(meal.estimatedCost || 0).toFixed(2)}`;
+  return `Adds ${formatCurrencyAmount(meal.estimatedCost || 0, currencySymbol)}`;
 }
 
 function getScheduledDates(count, weekdaysOnly) {
@@ -3355,12 +3397,14 @@ function LocationStep({ shoppingLocation, setShoppingLocation }) {
     <View style={styles.stack}>
       <View style={styles.sourceIntro}>
         <MapPin color={COLORS.cardinal} size={22} strokeWidth={2.6} />
-        <Text style={styles.sourceIntroText}>Use a ZIP code or city/state for a grocery cost estimate. Leave it blank for a national average.</Text>
+        <Text style={styles.sourceIntroText}>
+          Use a ZIP code, postal code, city, or country for a grocery cost estimate. Leave it blank for a US national average.
+        </Text>
       </View>
       <TextInput
         value={shoppingLocation}
         onChangeText={setShoppingLocation}
-        placeholder="ZIP or city, state"
+        placeholder="14450, Toronto, SW1A 1AA, London"
         placeholderTextColor="#999999"
         style={styles.cleanInput}
         autoCapitalize="words"
@@ -3377,8 +3421,9 @@ function LocationStep({ shoppingLocation, setShoppingLocation }) {
   );
 }
 
-function BudgetPreferenceStep({ budgetTarget, setBudgetTarget }) {
+function BudgetPreferenceStep({ budgetTarget, setBudgetTarget, shoppingLocation }) {
   const budget = Number(budgetTarget || 0);
+  const currencySymbol = getCurrencySymbolFromEstimateOrLocation(null, shoppingLocation);
 
   return (
     <View style={styles.stack}>
@@ -3404,13 +3449,15 @@ function BudgetPreferenceStep({ budgetTarget, setBudgetTarget }) {
       </Field>
       <View style={styles.budgetStatus}>
         <Text style={styles.budgetStatusText}>
-          {Number.isFinite(budget) && budget > 0 ? `$${budget.toFixed(2)} target` : 'Enter a budget to continue'}
+          {Number.isFinite(budget) && budget > 0
+            ? `${formatCurrencyAmount(budget, currencySymbol)} target`
+            : 'Enter a budget to continue'}
         </Text>
       </View>
       <View style={styles.quickBudgetRow}>
         {[50, 75, 100, 150].map((amount) => (
           <Pressable key={amount} onPress={() => setBudgetTarget(String(amount))} style={styles.quickBudget}>
-            <Text style={styles.quickBudgetText}>${amount}</Text>
+            <Text style={styles.quickBudgetText}>{formatCurrencyAmount(amount, currencySymbol, 0)}</Text>
           </Pressable>
         ))}
       </View>
@@ -3456,6 +3503,8 @@ function ReviewStep({
   sourceHandles,
   recipeVarietyMode
 }) {
+  const currencySymbol = getCurrencySymbolFromEstimateOrLocation(null, shoppingLocation);
+
   return (
     <View style={styles.reviewStack}>
       <SummaryLine label="Length" value={`${days} days${weekdaysOnly ? ', weekdays only' : ''}`} />
@@ -3472,7 +3521,7 @@ function ReviewStep({
         value={`${dietStyle}, ${formatCalorieTargetSummary(calorieTarget, enabledSlots.length, servingsPerMeal)}`}
       />
       <SummaryLine label="Pantry/fridge" value={pantryIngredients.trim() || 'Nothing entered'} />
-      <SummaryLine label="Budget" value={`$${Number(budgetTarget || 0).toFixed(2)}`} />
+      <SummaryLine label="Budget" value={formatCurrencyAmount(Number(budgetTarget || 0), currencySymbol)} />
       <SummaryLine label="Location" value={shoppingLocation || 'National average'} />
       <SummaryLine
         label="Social recipes"
@@ -3551,6 +3600,7 @@ function MenuBuilderScreen({
   menuPricing,
   budgetAmount,
   budgetRemaining,
+  shoppingLocation,
   onFindMoreOptions,
   onContinue,
   isEstimating,
@@ -3561,9 +3611,10 @@ function MenuBuilderScreen({
   const allRequirementsMet = areMealRequirementsMet(mealTypeRequirements, selectedCounts, recipeVarietyMode);
   const isOverBudget = budgetAmount > 0 && budgetRemaining < 0;
   const marginalCosts = menuPricing?.marginalCosts || {};
+  const currencySymbol = getCurrencySymbolFromEstimateOrLocation(menuPricing?.selectedEstimate, shoppingLocation);
   const repeatMode = recipeVarietyMode === 'same';
   const budgetLabel = budgetAmount > 0
-    ? `$${Math.abs(budgetRemaining || 0).toFixed(2)} ${isOverBudget ? 'over' : 'left'}`
+    ? `${formatCurrencyAmount(Math.abs(budgetRemaining || 0), currencySymbol)} ${isOverBudget ? 'over' : 'left'}`
     : 'Set a budget';
 
   return (
@@ -3599,8 +3650,8 @@ function MenuBuilderScreen({
             <Text style={styles.budgetMeterValue}>{budgetLabel}</Text>
           </View>
           <View style={styles.budgetMeterRight}>
-            <Text style={styles.budgetMeterMeta}>Used ${liveMenuEstimate.toFixed(2)}</Text>
-            <Text style={styles.budgetMeterMeta}>Budget ${budgetAmount || 0}</Text>
+            <Text style={styles.budgetMeterMeta}>Used {formatCurrencyAmount(liveMenuEstimate, currencySymbol)}</Text>
+            <Text style={styles.budgetMeterMeta}>Budget {formatCurrencyAmount(budgetAmount || 0, currencySymbol, 0)}</Text>
           </View>
         </View>
 
@@ -3653,7 +3704,7 @@ function MenuBuilderScreen({
                             <Text style={styles.menuMealMacros}>
                               {meal.macros?.calories || 0} cals, {meal.macros?.protein || 0}g protein
                             </Text>
-                            <Text style={styles.mealCost}>{formatMenuCostLabel(meal, selected, costInfo)}</Text>
+                            <Text style={styles.mealCost}>{formatMenuCostLabel(meal, selected, costInfo, currencySymbol)}</Text>
                           </View>
                         </View>
                       </Pressable>
@@ -3707,6 +3758,7 @@ function ResultScreen({
   error
 }) {
   const groceryEstimate = plan.groceryEstimate;
+  const currencySymbol = getCurrencySymbolFromEstimateOrLocation(groceryEstimate, plan.preferences?.location);
   const scheduledDates = getScheduledDates(plan.days.length, Boolean(plan.preferences?.weekdaysOnly));
   const activeDate = scheduledDates[selectedDay];
   const servingsEach = Math.max(1, Number(plan.preferences?.servingsPerMeal || 2));
@@ -3736,7 +3788,10 @@ function ResultScreen({
       <View style={styles.metricRow}>
         <Metric label="Avg cals" value={plan.summary.averageCalories} />
         <Metric label="Protein" value={`${plan.summary.averageProtein}g`} />
-        <Metric label="Groceries" value={groceryEstimate ? `$${Math.round(groceryEstimate.estimatedTotal)}` : 'TBD'} />
+        <Metric
+          label="Groceries"
+          value={groceryEstimate ? formatCurrencyAmount(groceryEstimate.estimatedTotal, currencySymbol, 0) : 'TBD'}
+        />
       </View>
 
       <Pressable onPress={() => onAddToCalendar?.(plan)} style={styles.calendarButton}>
@@ -3804,6 +3859,7 @@ function ResultScreen({
 
 function ShoppingListModule({ plan }) {
   const groceryEstimate = plan?.groceryEstimate;
+  const currencySymbol = getCurrencySymbolFromEstimateOrLocation(groceryEstimate, plan?.preferences?.location);
   const shoppingList = Array.isArray(plan?.shoppingList) ? plan.shoppingList : [];
   const lineItems = Array.isArray(groceryEstimate?.lineItems) ? groceryEstimate.lineItems : [];
 
@@ -3816,12 +3872,13 @@ function ShoppingListModule({ plan }) {
           <Text style={styles.moduleTitle}>Shopping list</Text>
           {groceryEstimate ? (
             <Text style={styles.estimateRange}>
-              {groceryEstimate.location}: ${groceryEstimate.rangeLow} - ${groceryEstimate.rangeHigh}
+              {groceryEstimate.location}: {formatCurrencyAmount(groceryEstimate.rangeLow, currencySymbol)} -{' '}
+              {formatCurrencyAmount(groceryEstimate.rangeHigh, currencySymbol)}
             </Text>
           ) : null}
         </View>
         {groceryEstimate ? (
-          <Text style={styles.estimateTotal}>${groceryEstimate.estimatedTotal}</Text>
+          <Text style={styles.estimateTotal}>{formatCurrencyAmount(groceryEstimate.estimatedTotal, currencySymbol)}</Text>
         ) : null}
       </View>
       {lineItems.length ? (
@@ -3832,7 +3889,7 @@ function ShoppingListModule({ plan }) {
                 <Text style={styles.costName}>{item.name}</Text>
                 <Text style={styles.costQuantity}>{item.quantityLabel}</Text>
               </View>
-              <Text style={styles.costPrice}>${item.estimatedCost}</Text>
+              <Text style={styles.costPrice}>{formatCurrencyAmount(item.estimatedCost, currencySymbol)}</Text>
             </View>
           ))}
         </View>

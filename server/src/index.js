@@ -618,7 +618,72 @@ function filterPantryRecipes(recipes = [], { pantryIngredients = '', mealType, e
     .filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType)
     .filter((recipe) => !excluded.has(normalizeRecipeIdentity(recipe.name)))
     .filter((recipe) => hasCookableRecipeSteps(recipe))
+    .filter((recipe) => !overCombinesPantryInventory(recipe, pantryTerms))
     .filter((recipe) => !usesUnsupportedMajorPantryAddition(recipe, pantryTerms));
+}
+
+function overCombinesPantryInventory(recipe = {}, pantryTerms = []) {
+  if (pantryTerms.length < 4) return false;
+
+  const searchable = normalizeRecipeIdentity([
+    recipe.name,
+    recipe.description,
+    ...(recipe.ingredients || [])
+  ].join(' '));
+  if (!searchable) return false;
+
+  const matched = pantryTerms
+    .map((term) => ({
+      term,
+      key: normalizeRecipeIdentity(term),
+      group: classifyPantryTerm(term)
+    }))
+    .filter((entry) => entry.key && entry.group !== 'seasoning' && searchable.includes(entry.key));
+
+  const uniqueMatched = new Map(matched.map((entry) => [entry.key, entry])).size;
+  const groups = new Map();
+
+  for (const entry of matched) {
+    if (!groups.has(entry.group)) groups.set(entry.group, new Set());
+    groups.get(entry.group).add(entry.key);
+  }
+
+  const proteinCount = groups.get('protein')?.size || 0;
+  const starchCount = groups.get('starch')?.size || 0;
+  const sauceCount = groups.get('sauce')?.size || 0;
+  const produceCount = groups.get('produce')?.size || 0;
+  const dairyCount = groups.get('dairy')?.size || 0;
+
+  if (proteinCount > 1) return true;
+  if (starchCount > 1) return true;
+  if (uniqueMatched > 5) return true;
+  if (proteinCount && starchCount && sauceCount && produceCount > 2) return true;
+  if (proteinCount && starchCount && dairyCount && sauceCount > 1) return true;
+
+  return false;
+}
+
+function classifyPantryTerm(value = '') {
+  const text = String(value || '').toLowerCase();
+  if (/\b(chicken|turkey|beef|steak|salmon|shrimp|tuna|pork|sausage|tofu|egg|eggs|cod|tilapia|fish)\b/.test(text)) {
+    return 'protein';
+  }
+  if (/\b(pasta|penne|shells|mac|macaroni|rice|quinoa|couscous|farro|oats|oatmeal|potato|potatoes|tortilla|bread|bun|flour|cereal)\b/.test(text)) {
+    return 'starch';
+  }
+  if (/\b(tomato sauce|pasta sauce|salsa|pesto|buffalo|hot sauce|soy sauce|teriyaki|marinara|dressing|broth|stock|bbq|barbecue)\b/.test(text)) {
+    return 'sauce';
+  }
+  if (/\b(yogurt|cheese|cottage|cream|milk|mozzarella|cheddar|parmesan|ricotta)\b/.test(text)) {
+    return 'dairy';
+  }
+  if (/\b(spinach|broccoli|tomato|tomatoes|pepper|peppers|onion|mushroom|zucchini|lettuce|cucumber|avocado|corn|carrot|beans|peas|vegetable|vegetables|fruit|berries|apple)\b/.test(text)) {
+    return 'produce';
+  }
+  if (/\b(salt|pepper|garlic powder|onion powder|paprika|seasoning|cumin|cinnamon|parsley|oregano|thyme|basil|chili powder)\b/.test(text)) {
+    return 'seasoning';
+  }
+  return 'other';
 }
 
 function usesUnsupportedMajorPantryAddition(recipe = {}, pantryTerms = []) {
