@@ -474,7 +474,26 @@ function measureIngredient(ingredient, rule, servings, options = {}) {
 
   if (rule.measure === 'servingOunces') {
     if (parsed.unit === 'oz' || parsed.unit === 'lb' || parsed.unit === 'g') {
-      const quantity = (parsed.unit === 'lb' ? amount * 16 : parsed.unit === 'g' ? amount / 28.35 : amount) * explicitScale;
+      const quantity = capServingOunceQuantity(
+        (parsed.unit === 'lb' ? amount * 16 : parsed.unit === 'g' ? amount / 28.35 : amount) * explicitScale,
+        rule,
+        servings,
+        options
+      );
+      return {
+        quantity,
+        ounces: quantity,
+        costUnits: quantity
+      };
+    }
+
+    if (parsed.unit === 'each' && hasLeadingAmount(ingredient)) {
+      const quantity = capServingOunceQuantity(
+        estimateExplicitProteinPieces(amount, rule, servings, options),
+        rule,
+        servings,
+        options
+      );
       return {
         quantity,
         ounces: quantity,
@@ -540,6 +559,29 @@ function measureIngredient(ingredient, rule, servings, options = {}) {
     ounces: 0,
     costUnits: quantity
   };
+}
+
+function estimateExplicitProteinPieces(amount, rule, servings, options = {}) {
+  const ouncesPerServing = Number(rule.ouncesPerServing || 6);
+  const pieces = Math.max(1, Number(amount || 1));
+  const pieceOunces = Number(rule.ouncesPerPiece || rule.ouncesPerServing || 6);
+  const explicitScale = options.scaleExplicitAmounts ? servings : 1;
+  const explicitOunces = pieces * pieceOunces * explicitScale;
+
+  if (options.scaleExplicitAmounts) return explicitOunces;
+
+  const servingFloor = Math.max(1, Number(servings || 1)) * ouncesPerServing;
+  return Math.max(explicitOunces, servingFloor);
+}
+
+function capServingOunceQuantity(quantity, rule, servings, options = {}) {
+  if (options.scaleExplicitAmounts) return quantity;
+
+  const ouncesPerServing = Number(rule.ouncesPerServing || 6);
+  const servingCount = Math.max(1, Number(servings || 1));
+  const maxReasonableMealOunces = Math.max(16, ouncesPerServing * servingCount * 2);
+
+  return Math.min(quantity, maxReasonableMealOunces);
 }
 
 function convertToGrams(amount, unit, defaultGrams = 1) {
