@@ -49,9 +49,13 @@ export function getSourceSeeds(selectedHandles = []) {
 export function buildSearchQueries({ protein, mealType, sourceHandles = [] }) {
   const sources = getSourceSeeds(sourceHandles);
   const core = `${protein} ${mealType} high protein low calorie recipe macros`;
+  const aestheticCore = `${protein} ${mealType} high protein aesthetic plated recipe`;
+  const colorfulCore = `${protein} ${mealType} colorful healthy meal prep recipe`;
 
   return [
     core,
+    aestheticCore,
+    colorfulCore,
     ...sources.slice(0, 2).map((source) => `${source.handle} ${core}`)
   ];
 }

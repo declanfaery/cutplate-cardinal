@@ -18,7 +18,13 @@ const FORMATS = {
     ['Cottage Cheese Toast Plate', 'cottage cheese, fruit, and a savory protein side'],
     ['Lean Morning Skillet', 'skillet vegetables, potatoes, and seasoned protein'],
     ['Overnight Protein Oats', 'oats, Greek yogurt, berries, and light syrup'],
-    ['Egg White Melt', 'egg whites, reduced-fat cheese, and vegetables']
+    ['Egg White Melt', 'egg whites, reduced-fat cheese, and vegetables'],
+    ['Shakshuka Breakfast Skillet', 'tomato-pepper sauce, eggs, herbs, and a warm skillet finish'],
+    ['Protein French Toast Stack', 'golden toast slices, yogurt drizzle, and berries'],
+    ['Breakfast Bento Box', 'egg bites, fruit, crunch, and a neat protein side'],
+    ['Layered Parfait Jar', 'Greek yogurt, fruit, measured crunch, and clean layers'],
+    ['Breakfast Quesadilla Wedges', 'eggs, vegetables, light cheese, and crisp tortilla wedges'],
+    ['Savory Toast Board', 'open-faced toast, colorful toppings, and lean protein']
   ],
   Lunch: [
     ['Power Bowl', 'rice or potatoes, crunchy vegetables, and a bright sauce'],
@@ -32,7 +38,14 @@ const FORMATS = {
     ['Taco Cauliflower Bowl', 'cauliflower rice, beans, pico, and avocado'],
     ['Shawarma Style Bowl', 'cucumber, tomatoes, rice, lemon, and garlic sauce'],
     ['High-Volume Chopped Salad', 'greens, vegetables, beans, and a bold sauce'],
-    ['Loaded Potato Bowl', 'potatoes, broccoli, light cheese, and protein']
+    ['Loaded Potato Bowl', 'potatoes, broccoli, light cheese, and protein'],
+    ['Bento Lunch Box', 'rice, crisp vegetables, fruit, and neatly separated protein'],
+    ['Banh Mi Salad Plate', 'crunchy vegetables, herbs, pickled notes, and lean protein'],
+    ['Caesar Wrap Wedges', 'romaine, light dressing, tortilla wedges, and protein'],
+    ['Poke-Inspired Rice Bowl', 'rice, cucumber, avocado, colorful vegetables, and glossy sauce'],
+    ['Mezze Protein Plate', 'cucumber, tomatoes, beans, yogurt sauce, and warm pita'],
+    ['Lettuce Cup Plate', 'crisp lettuce cups, sauced protein, rice, and herbs'],
+    ['Noodle Crunch Salad', 'cold noodles, crunchy vegetables, herbs, and bright dressing']
   ],
   Dinner: [
     ['Macro Dinner Plate', 'roasted vegetables, potatoes, and a simple sauce'],
@@ -46,7 +59,17 @@ const FORMATS = {
     ['Pesto Veg Plate', 'zucchini, tomatoes, potatoes, and light pesto'],
     ['Garlic Parmesan Bowl', 'broccoli, rice, light cheese, and protein'],
     ['Red Pepper Skillet', 'mixed vegetables, rice, and roasted red pepper sauce'],
-    ['Greek Dinner Bowl', 'rice, cucumber, tomatoes, and yogurt sauce']
+    ['Greek Dinner Bowl', 'rice, cucumber, tomatoes, and yogurt sauce'],
+    ['Stuffed Pepper Bake', 'bell pepper halves, sauced protein, rice, and melted finish'],
+    ['Kebab Plate', 'skewered-style protein, roasted vegetables, and yogurt sauce'],
+    ['Skillet Enchilada Bake', 'saucy tortilla strips, beans, vegetables, and protein'],
+    ['Protein Flatbread', 'crisp flatbread, colorful toppings, and a light sauce drizzle'],
+    ['Souvlaki Plate', 'rice, cucumber tomato salad, herbs, and lemon yogurt sauce'],
+    ['Tandoori-Style Tray', 'spiced protein, roasted vegetables, and cooling yogurt'],
+    ['Piccata Plate', 'lemon caper sauce, green vegetables, and seared protein'],
+    ['Sesame Noodle Bowl', 'noodles, vegetables, sesame sauce, and sliced protein'],
+    ['Taco Board', 'mini tortillas, salsa, lettuce, beans, and protein'],
+    ['Zucchini Boat Bake', 'zucchini halves, tomato sauce, protein, and light cheese']
   ],
   Snack: [
     ['Protein Snack Box', 'fruit, crunch, and a compact protein serving'],
@@ -58,7 +81,13 @@ const FORMATS = {
     ['Rice Cake Stack', 'rice cakes, protein topping, and seasoning'],
     ['Mini Taco Cup', 'beans, salsa, greens, and lean protein'],
     ['Protein Dip Box', 'light dip, vegetables, and a protein portion'],
-    ['Berry Crunch Bowl', 'berries, yogurt, and a measured crunch topping']
+    ['Berry Crunch Bowl', 'berries, yogurt, and a measured crunch topping'],
+    ['Yogurt Parfait Jar', 'Greek yogurt, fruit, and measured layered crunch'],
+    ['Protein Dessert Cup', 'whipped yogurt, cocoa, fruit, and a chilled finish'],
+    ['Apple Nacho Plate', 'apple slices, protein drizzle, cinnamon, and crunch'],
+    ['Egg Bite Box', 'egg bites, fruit, vegetables, and a tidy snack layout'],
+    ['Cottage Cheese Toast', 'toast, cottage cheese, fruit or vegetables, and seasoning'],
+    ['Chocolate Mousse Cup', 'Greek yogurt, cocoa, sweetener, and berries']
   ]
 };
 
@@ -112,7 +141,7 @@ const SIDE_SETS = {
 const FLAVOR_VARIATIONS = [
   {
     prefix: '',
-    lead: '',
+    lead: 'A bright measured sauce keeps the plate fresh without taking over the recipe.',
     ingredients: ['1 tbsp lime juice', '1/2 tsp garlic powder', '1/2 tsp chili powder', '1/4 tsp kosher salt', '1/4 tsp black pepper'],
     snackIngredients: ['1/2 tsp cinnamon'],
     finish: 'Finish with lime juice and the measured seasonings.'
@@ -144,6 +173,48 @@ const FLAVOR_VARIATIONS = [
     ingredients: ['1 tbsp lemon juice', '1 tsp Italian seasoning', '1/2 tsp garlic powder', '1/4 tsp kosher salt', '1/4 tsp black pepper'],
     snackIngredients: ['1/2 tsp Italian seasoning', '1/4 tsp garlic powder'],
     finish: 'Finish with lemon juice, Italian seasoning, garlic powder, salt, and pepper.'
+  },
+  {
+    prefix: '',
+    lead: 'Harissa yogurt brings color, gentle heat, and a glossy finish.',
+    ingredients: ['1 tbsp Greek yogurt sauce', '1 tsp harissa paste', '1 tsp lemon juice', '1/4 tsp kosher salt', '1/4 tsp black pepper'],
+    snackIngredients: ['1 tbsp Greek yogurt sauce', '1/4 tsp harissa paste'],
+    finish: 'Finish with Greek yogurt sauce, harissa paste, lemon juice, salt, and pepper.'
+  },
+  {
+    prefix: '',
+    lead: 'Gochujang sesame sauce gives the dish a glossy red finish and savory depth.',
+    ingredients: ['1 tbsp low-sodium soy sauce', '1 tsp gochujang', '1 tsp rice vinegar', '1/2 tsp sesame oil', '1/2 tsp sesame seeds'],
+    snackIngredients: ['1 tsp low-sodium soy sauce', '1/2 tsp sesame seeds'],
+    finish: 'Finish with soy sauce, gochujang, rice vinegar, sesame oil, and sesame seeds.'
+  },
+  {
+    prefix: '',
+    lead: 'Chimichurri-style herbs make the finished plate green, bright, and fresh.',
+    ingredients: ['1 tbsp red wine vinegar', '1 tsp dried parsley', '1/2 tsp oregano', '1/2 tsp garlic powder', '1/4 tsp kosher salt'],
+    snackIngredients: ['1 tsp red wine vinegar', '1/2 tsp dried parsley'],
+    finish: 'Finish with red wine vinegar, parsley, oregano, garlic powder, and salt.'
+  },
+  {
+    prefix: '',
+    lead: 'Salsa verde crema keeps the recipe colorful, creamy, and sharp.',
+    ingredients: ['1 tbsp salsa verde', '1 tbsp Greek yogurt sauce', '1 tsp lime juice', '1/4 tsp cumin', '1/4 tsp kosher salt'],
+    snackIngredients: ['1 tbsp salsa verde', '1 tsp Greek yogurt sauce'],
+    finish: 'Finish with salsa verde, Greek yogurt sauce, lime juice, cumin, and salt.'
+  },
+  {
+    prefix: '',
+    lead: 'Miso ginger sauce adds a glossy finish and a more restaurant-style flavor.',
+    ingredients: ['1 tsp white miso', '1 tbsp rice vinegar', '1 tsp grated ginger', '1 tsp low-sodium soy sauce', '1/2 tsp honey'],
+    snackIngredients: ['1 tsp rice vinegar', '1/2 tsp grated ginger'],
+    finish: 'Finish with miso, rice vinegar, ginger, soy sauce, and honey.'
+  },
+  {
+    prefix: '',
+    lead: 'Zaatar lemon seasoning adds a speckled herb finish and bright aroma.',
+    ingredients: ['1 tbsp lemon juice', '1 tsp zaatar seasoning', '1 tsp olive oil', '1/4 tsp kosher salt', '1/4 tsp black pepper'],
+    snackIngredients: ['1/2 tsp zaatar seasoning', '1 tsp lemon juice'],
+    finish: 'Finish with lemon juice, zaatar, olive oil, salt, and pepper.'
   }
 ];
 
@@ -161,6 +232,29 @@ const NAME_FINISHES = [
   'with Fajita Vegetables',
   'with Dill Yogurt Sauce'
 ];
+
+const PRESENTATION_CUES = {
+  Breakfast: [
+    'Plate it with berries or vegetables visible on top for color contrast.',
+    'Cut or layer the finished meal so the fruit, eggs, or greens stay visible.',
+    'Keep sauce or yogurt in a clean drizzle instead of mixing everything flat.'
+  ],
+  Lunch: [
+    'Arrange the protein, vegetables, and carb in sections so the meal looks composed.',
+    'Finish with herbs, pickled vegetables, or sauce in a visible drizzle when available.',
+    'Use crisp vegetables for height and color instead of burying everything together.'
+  ],
+  Dinner: [
+    'Slice the protein or arrange it beside the vegetables so the plate has shape and contrast.',
+    'Keep roasted vegetables in separate colorful clusters before adding the sauce.',
+    'Add the sauce last as a measured drizzle so the finished meal stays clean and photo-ready.'
+  ],
+  Snack: [
+    'Layer or stack the snack so the fruit, crunch, and protein are visible.',
+    'Keep the dip or yogurt separate for a cleaner snack-box presentation.',
+    'Finish with a measured sprinkle for texture and contrast.'
+  ]
+};
 
 export function attachRecipeLibrary(plan, preferences = plan.preferences || {}) {
   const recipeLibrary = buildRecipeLibrary(plan, preferences);
@@ -185,7 +279,8 @@ function buildOption({ mealType, index, preferences, plan }) {
   const protein = proteins[index % proteins.length];
   const formats = FORMATS[mealType] || FORMATS.Lunch;
   const [format, descriptionTail] = formats[index % formats.length];
-  const variation = FLAVOR_VARIATIONS[Math.floor(index / formats.length) % FLAVOR_VARIATIONS.length];
+  const variation = FLAVOR_VARIATIONS[index % FLAVOR_VARIATIONS.length];
+  const presentationCue = getPresentationCue(mealType, index);
   const slot = (preferences.mealSlots || []).find((mealSlot) => mealSlot.type === mealType);
   const sources = getSourceSeeds(preferences.sourceHandles).slice(0, 2);
   const macros = buildMacros(mealType, index, protein, preferences);
@@ -199,17 +294,12 @@ function buildOption({ mealType, index, preferences, plan }) {
     time: slot?.time || defaultTime(mealType),
     name,
     protein: cleanProteinName(protein),
-    description: `${variation.lead ? `${variation.lead} ` : ''}${descriptionTail} built as a weight-loss friendly, high-protein meal.`,
+    description: `${variation.lead ? `${variation.lead} ` : ''}${descriptionTail} built as a weight-loss friendly, high-protein meal. ${presentationCue}`,
     macroRating: macros.protein >= 35 && macros.calories <= 620 ? 'SUPER FIT' : 'FIT',
     prepTime: mealType === 'Snack' ? '5 min' : index % 3 === 0 ? '20 min' : '25 min',
     macros,
     ingredients,
-    steps: [
-      `Season and cook the ${cleanProteinName(protein).toLowerCase()} until done.`,
-      'Prepare the vegetables and carb base.',
-      'Build the meal in a bowl or plate.',
-      variation.finish
-    ],
+    steps: buildLibrarySteps(mealType, protein, variation),
     sources: sources.map((source) => ({
       label: source.label,
       url: source.url,
@@ -221,6 +311,29 @@ function buildOption({ mealType, index, preferences, plan }) {
       sourceHandles: preferences.sourceHandles
     })
   };
+}
+
+function getPresentationCue(mealType, index) {
+  const cues = PRESENTATION_CUES[mealType] || PRESENTATION_CUES.Lunch;
+  return cues[index % cues.length];
+}
+
+function buildLibrarySteps(mealType, protein, variation) {
+  if (mealType === 'Snack') {
+    return [
+      `Prepare the ${cleanProteinName(protein).toLowerCase()} and portion it into a snack container or small plate.`,
+      'Slice the fruit or vegetables and keep the crunch separate until serving.',
+      'Layer or stack the snack so the colors and textures are visible.',
+      variation.finish
+    ];
+  }
+
+  return [
+    `Season and cook the ${cleanProteinName(protein).toLowerCase()} over medium heat until browned and safe to eat.`,
+    'Prepare the vegetables and carb base, keeping one crisp or colorful item for the finish.',
+    'Plate the carb or greens first, add the protein, then arrange vegetables in visible sections for contrast.',
+    variation.finish
+  ];
 }
 
 function buildLibraryRecipeName(protein, format, index, formatCount) {
