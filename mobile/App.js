@@ -3404,7 +3404,7 @@ function LocationStep({ shoppingLocation, setShoppingLocation }) {
       <TextInput
         value={shoppingLocation}
         onChangeText={setShoppingLocation}
-        placeholder="14450, Toronto, SW1A 1AA, London"
+        placeholder="10001, Toronto, SW1A 1AA, London"
         placeholderTextColor="#999999"
         style={styles.cleanInput}
         autoCapitalize="words"
