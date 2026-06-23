@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { SOURCE_POLICY_NOTES, getSourceSeeds } from './sources.js';
 import { normalizePreferences } from './recipeEngine.js';
+import { trackAnalyticsEvent } from './analytics.js';
 
 const RECIPE_SCHEMA = {
   type: 'object',
@@ -143,7 +144,7 @@ export async function generateAiMealPlan(input = {}) {
   const discoveryInstruction = sourceSeeds.length
     ? 'Use web search for recipe/source discovery across the public web and the selected public social creator seeds, but do not copy creator captions, recipes, or post text.'
     : 'Use web search for recipe/source discovery across the public web. Do not copy creator captions, recipes, or post text.';
-  const response = await client.responses.create({
+  const response = await createTrackedResponse(client, {
     model: process.env.OPENAI_MODEL || 'gpt-5-nano',
     input: [
       {
@@ -188,6 +189,10 @@ export async function generateAiMealPlan(input = {}) {
         schema: PLAN_SCHEMA
       }
     }
+  }, {
+    feature: 'meal_plan',
+    analyticsContext: input.analyticsContext,
+    webSearch: useWebSearch
   });
 
   const outputText = response.output_text;
@@ -220,7 +225,7 @@ export async function analyzePantryImage(input = {}) {
   }
 
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const response = await client.responses.create({
+  const response = await createTrackedResponse(client, {
     model: process.env.OPENAI_VISION_MODEL || process.env.OPENAI_MODEL || 'gpt-5-nano',
     input: [
       {
@@ -257,6 +262,10 @@ export async function analyzePantryImage(input = {}) {
         schema: PANTRY_IMAGE_SCHEMA
       }
     }
+  }, {
+    feature: 'pantry_scan',
+    analyticsContext: input.analyticsContext,
+    webSearch: false
   });
 
   const outputText = response.output_text;
@@ -294,7 +303,7 @@ export async function generateSourcedPantryRecipes(input = {}) {
     throw error;
   }
 
-  const response = await client.responses.create({
+  const response = await createTrackedResponse(client, {
     model: process.env.OPENAI_MODEL || 'gpt-5-nano',
     input: [
       {
@@ -344,6 +353,10 @@ export async function generateSourcedPantryRecipes(input = {}) {
         schema: PANTRY_SCHEMA
       }
     }
+  }, {
+    feature: 'pantry_recipes',
+    analyticsContext: input.analyticsContext,
+    webSearch: true
   });
 
   const outputText = response.output_text;
@@ -649,4 +662,90 @@ function macroSchema() {
       fat: { type: 'number' }
     }
   };
+}
+
+async function createTrackedResponse(client, request, {
+  feature,
+  analyticsContext = {},
+  webSearch = false
+} = {}) {
+  const startedAt = Date.now();
+  const model = String(request?.model || process.env.OPENAI_MODEL || '').trim();
+
+  try {
+    const response = await client.responses.create(request);
+    const usage = normalizeOpenAiUsage(response?.usage);
+    await safelyTrackAiEvent({
+      ...analyticsContext,
+      eventName: 'ai_request_completed',
+      properties: {
+        feature,
+        model,
+        webSearch,
+        durationMs: Date.now() - startedAt,
+        ...usage,
+        estimatedCostUsd: estimateOpenAiCost(usage)
+      }
+    });
+    return response;
+  } catch (error) {
+    await safelyTrackAiEvent({
+      ...analyticsContext,
+      eventName: 'ai_request_failed',
+      properties: {
+        feature,
+        model,
+        webSearch,
+        durationMs: Date.now() - startedAt,
+        errorType: classifyAiError(error)
+      }
+    });
+    throw error;
+  }
+}
+
+function normalizeOpenAiUsage(usage = {}) {
+  const inputTokens = toFiniteNumber(usage.input_tokens ?? usage.inputTokens);
+  const outputTokens = toFiniteNumber(usage.output_tokens ?? usage.outputTokens);
+  const totalTokens = toFiniteNumber(usage.total_tokens ?? usage.totalTokens)
+    || inputTokens + outputTokens;
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens
+  };
+}
+
+function estimateOpenAiCost({ inputTokens = 0, outputTokens = 0 } = {}) {
+  const inputRate = toFiniteNumber(process.env.OPENAI_INPUT_COST_PER_1M);
+  const outputRate = toFiniteNumber(process.env.OPENAI_OUTPUT_COST_PER_1M);
+  if (inputRate <= 0 && outputRate <= 0) return null;
+
+  return Number((
+    (inputTokens / 1_000_000) * inputRate
+    + (outputTokens / 1_000_000) * outputRate
+  ).toFixed(6));
+}
+
+async function safelyTrackAiEvent(input) {
+  try {
+    await trackAnalyticsEvent(input);
+  } catch {
+    // Analytics must never block recipe generation.
+  }
+}
+
+function classifyAiError(error) {
+  const status = Number(error?.status || error?.statusCode || 0);
+  const message = String(error?.message || '').toLowerCase();
+  if (status === 429 || /rate limit/.test(message)) return 'rate_limit';
+  if (status === 401 || status === 403) return 'authorization';
+  if (status >= 500 || /timeout|timed out|etimedout/.test(message)) return 'provider';
+  return 'request';
+}
+
+function toFiniteNumber(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number : 0;
 }

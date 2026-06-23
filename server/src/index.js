@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { timingSafeEqual } from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import { buildMealPlan, normalizePreferences } from './recipeEngine.js';
@@ -25,7 +26,7 @@ import {
   stampUncachedResponse
 } from './planCache.js';
 import { confirmSignup, createSignup, deleteSignup } from './users.js';
-import { getAnalyticsSettings, trackAnalyticsEvent } from './analytics.js';
+import { getAnalyticsSettings, getAnalyticsSummary, trackAnalyticsEvent } from './analytics.js';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -114,6 +115,15 @@ app.post('/api/analytics/event', async (req, res, next) => {
   }
 });
 
+app.get('/api/admin/analytics/summary', async (req, res, next) => {
+  try {
+    requireAnalyticsAdminKey(req);
+    res.json(await getAnalyticsSummary({ days: req.query.days }));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/analyze-pantry-photo', async (req, res, next) => {
   try {
     if (!process.env.OPENAI_API_KEY) {
@@ -133,12 +143,38 @@ app.post('/api/analyze-pantry-photo', async (req, res, next) => {
       return res.status(413).json({ error: 'That photo is too large. Try a smaller image.' });
     }
 
-    const analysis = await analyzePantryImage({ imageBase64, mimeType });
+    const analysis = await analyzePantryImage({
+      imageBase64,
+      mimeType,
+      analyticsContext: req.body?.analyticsContext
+    });
     res.json(analysis);
   } catch (error) {
     next(error);
   }
 });
+
+function requireAnalyticsAdminKey(req) {
+  const expected = String(process.env.ANALYTICS_ADMIN_KEY || '').trim();
+  const provided = String(req.get('x-analytics-key') || '').trim();
+
+  if (!expected) {
+    const error = new Error('Analytics reporting is not configured.');
+    error.status = 503;
+    throw error;
+  }
+
+  const expectedBuffer = Buffer.from(expected);
+  const providedBuffer = Buffer.from(provided);
+  const matches = expectedBuffer.length === providedBuffer.length
+    && timingSafeEqual(expectedBuffer, providedBuffer);
+
+  if (!matches) {
+    const error = new Error('Analytics admin key is invalid.');
+    error.status = 401;
+    throw error;
+  }
+}
 
 app.post('/api/pantry-recipes', async (req, res, next) => {
   try {
@@ -327,7 +363,7 @@ app.post('/api/plan', async (req, res) => {
   }
 
   if (aiConfigured) {
-    const aiResponsePromise = getOrStartAiPlan(preferences);
+    const aiResponsePromise = getOrStartAiPlan(preferences, req.body?.analyticsContext);
 
     if (shouldReturnFastFirst()) {
       const localPlan = buildMealPlan(preferences);
@@ -745,12 +781,12 @@ function parseBoolean(value) {
   return /^(1|true|yes)$/i.test(String(value || ''));
 }
 
-function getOrStartAiPlan(preferences) {
+function getOrStartAiPlan(preferences, analyticsContext) {
   const key = buildPlanCacheKey(preferences);
   const existing = pendingAiPlans.get(key);
   if (existing) return existing;
 
-  const promise = buildAiPlanResponse(preferences)
+  const promise = buildAiPlanResponse(preferences, analyticsContext)
     .then(async (response) => {
       await setCachedPlan(preferences, response);
       return response;
@@ -764,8 +800,8 @@ function getOrStartAiPlan(preferences) {
   return promise;
 }
 
-async function buildAiPlanResponse(preferences) {
-  const generatedPlan = await generateAiMealPlan(preferences);
+async function buildAiPlanResponse(preferences, analyticsContext) {
+  const generatedPlan = await generateAiMealPlan({ ...preferences, analyticsContext });
   const completed = await completeMenuRecipeLibrary(generatedPlan, preferences);
   const aiPlan = attachGroceryEstimate(completed.plan, preferences);
   return {
