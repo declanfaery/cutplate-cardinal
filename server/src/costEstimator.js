@@ -12,6 +12,39 @@ const ZIP_MULTIPLIERS = [
   { pattern: /^(40|41|42|43|44|45|46|47|48|49|50|51|52|53|54|55|56|57|58|59|60|61|62|63|64|65|66|67|68|69)/, multiplier: 0.94 }
 ];
 
+const INTERNATIONAL_PRICE_PROFILES = [
+  {
+    key: 'canada',
+    label: 'Canada average',
+    currency: 'CAD',
+    currencySymbol: 'C$',
+    currencyScale: 1.34,
+    regionalMultiplier: 1.05,
+    pattern:
+      /\b(canada|canadian|ontario|quebec|british columbia|alberta|manitoba|saskatchewan|nova scotia|new brunswick|toronto|vancouver|montreal|ottawa|calgary|edmonton)\b|^[A-Z]\d[A-Z]\s?\d[A-Z]\d$/i
+  },
+  {
+    key: 'uk',
+    label: 'UK average',
+    currency: 'GBP',
+    currencySymbol: '\u00a3',
+    currencyScale: 0.82,
+    regionalMultiplier: 1.04,
+    pattern:
+      /\b(uk|u\.k\.|united kingdom|england|scotland|wales|northern ireland|london|manchester|birmingham|glasgow|edinburgh|liverpool|bristol|leeds)\b|^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i
+  },
+  {
+    key: 'eu',
+    label: 'EU average',
+    currency: 'EUR',
+    currencySymbol: '\u20ac',
+    currencyScale: 0.94,
+    regionalMultiplier: 1.03,
+    pattern:
+      /\b(eu|europe|eurozone|ireland|france|germany|spain|italy|netherlands|belgium|portugal|austria|sweden|denmark|finland|poland|dublin|paris|berlin|madrid|rome|amsterdam|brussels|lisbon|vienna|stockholm|copenhagen|helsinki|warsaw)\b/i
+  }
+];
+
 const PRICE_RULES = [
   { pattern: /chicken thighs?/i, label: 'Chicken thighs', unit: 'oz', price: 3.49 / 16, measure: 'servingOunces', ouncesPerServing: 5, storePackage: fixedPackage(24, 7.49, 'tray', 'trays', '~1.5 lb') },
   { pattern: /chicken/i, label: 'Chicken breasts', unit: 'oz', price: 3.99 / 16, measure: 'servingOunces', ouncesPerServing: 6, storePackage: fixedPackage(32, 11.49, 'tray', 'trays', '~2 lb, 3-4 breasts') },
@@ -217,24 +250,28 @@ export function buildAssignedMealPlan(plan, assignments = []) {
 export function estimateGroceryCost(plan, preferences = {}) {
   const servings = clamp(Number(preferences.servingsPerMeal || plan.preferences?.servingsPerMeal || 2), 1, 12);
   const location = String(preferences.location || plan.preferences?.location || '').trim();
-  const multiplier = getLocationMultiplier(location);
+  const pricing = getLocationPricingProfile(location);
   const items = collectPricedItems(plan, servings);
-  const lineItems = buildLineItems(items, multiplier);
+  const lineItems = buildLineItems(items, pricing.priceMultiplier);
 
   const subtotal = lineItems.reduce((total, item) => total + item.estimatedCost, 0);
   const pantryBuffer = subtotal > 0 ? Math.max(3, subtotal * 0.07) : 0;
   const estimatedTotal = roundMoney(subtotal + pantryBuffer);
 
   return {
-    location: location || 'national average',
-    regionalMultiplier: Math.round(multiplier * 100) / 100,
+    location: location || pricing.label,
+    region: pricing.key,
+    regionLabel: pricing.label,
+    currency: pricing.currency,
+    currencySymbol: pricing.currencySymbol,
+    regionalMultiplier: Math.round(pricing.regionalMultiplier * 100) / 100,
     estimatedTotal,
     rangeLow: roundMoney(estimatedTotal * 0.85),
     rangeHigh: roundMoney(estimatedTotal * 1.18),
     pantryBuffer: roundMoney(pantryBuffer),
     lineItems,
     note:
-      'Estimated from generated ingredients, servings, store-style package sizes, and a regional grocery multiplier. Exact prices vary by store, brand, season, and sale pricing.'
+      `${pricing.label} estimate from generated ingredients, servings, store-style package sizes, and regional grocery pricing. Exact prices vary by store, brand, season, and sale pricing.`
   };
 }
 
@@ -801,6 +838,29 @@ function getLocationMultiplier(location) {
   return locationMatch?.multiplier || 1;
 }
 
+function getLocationPricingProfile(location) {
+  const normalized = String(location || '').trim();
+  const international = INTERNATIONAL_PRICE_PROFILES.find((entry) => entry.pattern.test(normalized));
+
+  if (international) {
+    return {
+      ...international,
+      priceMultiplier: international.currencyScale * international.regionalMultiplier
+    };
+  }
+
+  const regionalMultiplier = getLocationMultiplier(normalized);
+  return {
+    key: 'us',
+    label: normalized ? 'US regional' : 'US national average',
+    currency: 'USD',
+    currencySymbol: '$',
+    currencyScale: 1,
+    regionalMultiplier,
+    priceMultiplier: regionalMultiplier
+  };
+}
+
 function normalizeFallbackName(value) {
   return normalizeIngredientForPricing(value || 'Pantry item')
     .replace(/^\d+(\.\d+)?\s*/g, '')
@@ -828,9 +888,9 @@ function clamp(value, min, max) {
 function estimateSingleMealCost(meal, preferences = {}) {
   const servings = clamp(Number(preferences.servingsPerMeal || 2), 1, 12);
   const location = String(preferences.location || '').trim();
-  const multiplier = getLocationMultiplier(location);
+  const pricing = getLocationPricingProfile(location);
   const items = collectPricedItems({ days: [{ meals: [meal] }] }, servings);
-  const subtotal = buildLineItems(items, multiplier).reduce((total, item) => total + item.estimatedCost, 0);
+  const subtotal = buildLineItems(items, pricing.priceMultiplier).reduce((total, item) => total + item.estimatedCost, 0);
 
   return roundMoney(subtotal);
 }

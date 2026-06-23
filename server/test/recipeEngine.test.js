@@ -76,6 +76,7 @@ test('builds a large selectable recipe library with varied per-meal calories', (
   const lunchOptions = plan.recipeLibrary.filter((meal) => meal.mealType === 'Lunch');
   const lunchCalories = new Set(lunchOptions.map((meal) => meal.macros.calories));
   const optionNames = new Set(plan.recipeLibrary.map((meal) => meal.name));
+  const optionText = plan.recipeLibrary.map((meal) => `${meal.name} ${meal.description}`).join(' ');
 
   for (const mealType of ['Breakfast', 'Lunch', 'Dinner', 'Snack']) {
     assert.ok(
@@ -87,6 +88,8 @@ test('builds a large selectable recipe library with varied per-meal calories', (
   assert.ok(lunchCalories.size > 4);
   assert.equal(optionNames.size, plan.recipeLibrary.length);
   assert.ok(lunchOptions.every((meal) => meal.macros.calories >= 380 && meal.macros.calories <= 620));
+  assert.match(optionText, /Bento|Parfait|Stuffed Pepper|Kebab|Flatbread|Lettuce Cup|Zucchini Boat/);
+  assert.match(optionText, /color|contrast|layer|drizzle|visible|photo-ready/i);
 });
 
 test('normalizes recipe option targets to cover longer menu selection flows', () => {

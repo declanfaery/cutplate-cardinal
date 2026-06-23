@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { timingSafeEqual } from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import { buildMealPlan, normalizePreferences } from './recipeEngine.js';
@@ -25,7 +26,7 @@ import {
   stampUncachedResponse
 } from './planCache.js';
 import { confirmSignup, createSignup, deleteSignup } from './users.js';
-import { getAnalyticsSettings, trackAnalyticsEvent } from './analytics.js';
+import { getAnalyticsSettings, getAnalyticsSummary, trackAnalyticsEvent } from './analytics.js';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -114,6 +115,15 @@ app.post('/api/analytics/event', async (req, res, next) => {
   }
 });
 
+app.get('/api/admin/analytics/summary', async (req, res, next) => {
+  try {
+    requireAnalyticsAdminKey(req);
+    res.json(await getAnalyticsSummary({ days: req.query.days }));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/analyze-pantry-photo', async (req, res, next) => {
   try {
     if (!process.env.OPENAI_API_KEY) {
@@ -133,12 +143,38 @@ app.post('/api/analyze-pantry-photo', async (req, res, next) => {
       return res.status(413).json({ error: 'That photo is too large. Try a smaller image.' });
     }
 
-    const analysis = await analyzePantryImage({ imageBase64, mimeType });
+    const analysis = await analyzePantryImage({
+      imageBase64,
+      mimeType,
+      analyticsContext: req.body?.analyticsContext
+    });
     res.json(analysis);
   } catch (error) {
     next(error);
   }
 });
+
+function requireAnalyticsAdminKey(req) {
+  const expected = String(process.env.ANALYTICS_ADMIN_KEY || '').trim();
+  const provided = String(req.get('x-analytics-key') || '').trim();
+
+  if (!expected) {
+    const error = new Error('Analytics reporting is not configured.');
+    error.status = 503;
+    throw error;
+  }
+
+  const expectedBuffer = Buffer.from(expected);
+  const providedBuffer = Buffer.from(provided);
+  const matches = expectedBuffer.length === providedBuffer.length
+    && timingSafeEqual(expectedBuffer, providedBuffer);
+
+  if (!matches) {
+    const error = new Error('Analytics admin key is invalid.');
+    error.status = 401;
+    throw error;
+  }
+}
 
 app.post('/api/pantry-recipes', async (req, res, next) => {
   try {
@@ -327,7 +363,7 @@ app.post('/api/plan', async (req, res) => {
   }
 
   if (aiConfigured) {
-    const aiResponsePromise = getOrStartAiPlan(preferences);
+    const aiResponsePromise = getOrStartAiPlan(preferences, req.body?.analyticsContext);
 
     if (shouldReturnFastFirst()) {
       const localPlan = buildMealPlan(preferences);
@@ -618,7 +654,72 @@ function filterPantryRecipes(recipes = [], { pantryIngredients = '', mealType, e
     .filter((recipe) => normalizePantryMealType(recipe.mealType) === mealType)
     .filter((recipe) => !excluded.has(normalizeRecipeIdentity(recipe.name)))
     .filter((recipe) => hasCookableRecipeSteps(recipe))
+    .filter((recipe) => !overCombinesPantryInventory(recipe, pantryTerms))
     .filter((recipe) => !usesUnsupportedMajorPantryAddition(recipe, pantryTerms));
+}
+
+function overCombinesPantryInventory(recipe = {}, pantryTerms = []) {
+  if (pantryTerms.length < 4) return false;
+
+  const searchable = normalizeRecipeIdentity([
+    recipe.name,
+    recipe.description,
+    ...(recipe.ingredients || [])
+  ].join(' '));
+  if (!searchable) return false;
+
+  const matched = pantryTerms
+    .map((term) => ({
+      term,
+      key: normalizeRecipeIdentity(term),
+      group: classifyPantryTerm(term)
+    }))
+    .filter((entry) => entry.key && entry.group !== 'seasoning' && searchable.includes(entry.key));
+
+  const uniqueMatched = new Map(matched.map((entry) => [entry.key, entry])).size;
+  const groups = new Map();
+
+  for (const entry of matched) {
+    if (!groups.has(entry.group)) groups.set(entry.group, new Set());
+    groups.get(entry.group).add(entry.key);
+  }
+
+  const proteinCount = groups.get('protein')?.size || 0;
+  const starchCount = groups.get('starch')?.size || 0;
+  const sauceCount = groups.get('sauce')?.size || 0;
+  const produceCount = groups.get('produce')?.size || 0;
+  const dairyCount = groups.get('dairy')?.size || 0;
+
+  if (proteinCount > 1) return true;
+  if (starchCount > 1) return true;
+  if (uniqueMatched > 5) return true;
+  if (proteinCount && starchCount && sauceCount && produceCount > 2) return true;
+  if (proteinCount && starchCount && dairyCount && sauceCount > 1) return true;
+
+  return false;
+}
+
+function classifyPantryTerm(value = '') {
+  const text = String(value || '').toLowerCase();
+  if (/\b(chicken|turkey|beef|steak|salmon|shrimp|tuna|pork|sausage|tofu|egg|eggs|cod|tilapia|fish)\b/.test(text)) {
+    return 'protein';
+  }
+  if (/\b(pasta|penne|shells|mac|macaroni|rice|quinoa|couscous|farro|oats|oatmeal|potato|potatoes|tortilla|bread|bun|flour|cereal)\b/.test(text)) {
+    return 'starch';
+  }
+  if (/\b(tomato sauce|pasta sauce|salsa|pesto|buffalo|hot sauce|soy sauce|teriyaki|marinara|dressing|broth|stock|bbq|barbecue)\b/.test(text)) {
+    return 'sauce';
+  }
+  if (/\b(yogurt|cheese|cottage|cream|milk|mozzarella|cheddar|parmesan|ricotta)\b/.test(text)) {
+    return 'dairy';
+  }
+  if (/\b(spinach|broccoli|tomato|tomatoes|pepper|peppers|onion|mushroom|zucchini|lettuce|cucumber|avocado|corn|carrot|beans|peas|vegetable|vegetables|fruit|berries|apple)\b/.test(text)) {
+    return 'produce';
+  }
+  if (/\b(salt|pepper|garlic powder|onion powder|paprika|seasoning|cumin|cinnamon|parsley|oregano|thyme|basil|chili powder)\b/.test(text)) {
+    return 'seasoning';
+  }
+  return 'other';
 }
 
 function usesUnsupportedMajorPantryAddition(recipe = {}, pantryTerms = []) {
@@ -680,12 +781,12 @@ function parseBoolean(value) {
   return /^(1|true|yes)$/i.test(String(value || ''));
 }
 
-function getOrStartAiPlan(preferences) {
+function getOrStartAiPlan(preferences, analyticsContext) {
   const key = buildPlanCacheKey(preferences);
   const existing = pendingAiPlans.get(key);
   if (existing) return existing;
 
-  const promise = buildAiPlanResponse(preferences)
+  const promise = buildAiPlanResponse(preferences, analyticsContext)
     .then(async (response) => {
       await setCachedPlan(preferences, response);
       return response;
@@ -699,8 +800,8 @@ function getOrStartAiPlan(preferences) {
   return promise;
 }
 
-async function buildAiPlanResponse(preferences) {
-  const generatedPlan = await generateAiMealPlan(preferences);
+async function buildAiPlanResponse(preferences, analyticsContext) {
+  const generatedPlan = await generateAiMealPlan({ ...preferences, analyticsContext });
   const completed = await completeMenuRecipeLibrary(generatedPlan, preferences);
   const aiPlan = attachGroceryEstimate(completed.plan, preferences);
   return {
