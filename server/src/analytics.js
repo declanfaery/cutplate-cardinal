@@ -26,14 +26,17 @@ export function getAnalyticsSettings() {
 
 export async function trackAnalyticsEvent(input = {}) {
   const event = normalizeAnalyticsEvent(input);
+  let result;
 
   if (pool) {
-    return insertDatabaseEvent(event);
+    result = await insertDatabaseEvent(event);
+  } else {
+    await mkdir(cacheDir, { recursive: true });
+    await appendFile(analyticsPath, `${JSON.stringify({ id: randomUUID(), createdAt: new Date().toISOString(), ...event })}\n`);
+    result = { ok: true, storage: 'local-cache' };
   }
 
-  await mkdir(cacheDir, { recursive: true });
-  await appendFile(analyticsPath, `${JSON.stringify({ id: randomUUID(), createdAt: new Date().toISOString(), ...event })}\n`);
-  return { ok: true, storage: 'local-cache' };
+  return result;
 }
 
 export async function getAnalyticsSummary({ days = 30, client = pool } = {}) {
@@ -148,6 +151,20 @@ export async function getAnalyticsSummary({ days = 30, client = pool } = {}) {
        group by properties->>'name'
        order by count(*) desc
        limit 20
+     ),
+     unique_price_observations as (
+       select
+         created_at,
+         coalesce(
+           nullif(user_id, ''),
+           nullif(email, ''),
+           nullif(anonymous_id, '')
+         ) as identity_key,
+         estimated_total,
+         actual_total,
+         derived_rating
+       from public.grocery_price_observations
+       where coalesce(platform, '') not in ('manual', 'test')
      )
      select
        now() as generated_at,
@@ -207,12 +224,14 @@ export async function getAnalyticsSummary({ days = 30, client = pool } = {}) {
        (select count(*) from valid_events where event_name in ('meal_plan_generated', 'pantry_recipes_generated', 'pantry_recipes_more_generated') and created_at >= now() - make_interval(days => $1)) as generation_sessions,
        (select count(*) from valid_events where event_name in ('meal_plan_generated', 'pantry_recipes_generated', 'pantry_recipes_more_generated') and properties->>'cacheHit' = 'true' and created_at >= now() - make_interval(days => $1)) as cache_hit_sessions,
        (select count(*) from valid_events where event_name = 'grocery_estimate_feedback' and created_at >= now() - make_interval(days => $1)) as grocery_feedback_responses,
-       (select count(*) from valid_events where event_name = 'grocery_estimate_feedback' and properties->>'rating' = 'too_low' and created_at >= now() - make_interval(days => $1)) as grocery_feedback_too_low,
-       (select count(*) from valid_events where event_name = 'grocery_estimate_feedback' and properties->>'rating' = 'close' and created_at >= now() - make_interval(days => $1)) as grocery_feedback_close,
-       (select count(*) from valid_events where event_name = 'grocery_estimate_feedback' and properties->>'rating' = 'too_high' and created_at >= now() - make_interval(days => $1)) as grocery_feedback_too_high,
-       (select avg(case when properties->>'errorPct' ~ '^-?[0-9]+(\\.[0-9]+)?$' then (properties->>'errorPct')::numeric end) from valid_events where event_name = 'grocery_estimate_feedback' and created_at >= now() - make_interval(days => $1)) as average_grocery_error_pct,
-       (select avg(case when properties->>'errorPct' ~ '^-?[0-9]+(\\.[0-9]+)?$' then abs((properties->>'errorPct')::numeric) end) from valid_events where event_name = 'grocery_estimate_feedback' and created_at >= now() - make_interval(days => $1)) as average_grocery_absolute_error_pct,
-       (select coalesce(sum(case when properties->>'actualTotal' ~ '^-?[0-9]+(\\.[0-9]+)?$' then (properties->>'actualTotal')::numeric else 0 end), 0) from valid_events where event_name = 'grocery_estimate_feedback' and created_at >= now() - make_interval(days => $1)) as actual_grocery_spend_captured,
+       (select count(*) from unique_price_observations where created_at >= now() - make_interval(days => $1)) as unique_checkout_observations,
+       (select count(distinct identity_key) from unique_price_observations where created_at >= now() - make_interval(days => $1)) as grocery_price_contributors,
+       (select count(*) from unique_price_observations where derived_rating = 'too_low' and created_at >= now() - make_interval(days => $1)) as grocery_feedback_too_low,
+       (select count(*) from unique_price_observations where derived_rating = 'close' and created_at >= now() - make_interval(days => $1)) as grocery_feedback_close,
+       (select count(*) from unique_price_observations where derived_rating = 'too_high' and created_at >= now() - make_interval(days => $1)) as grocery_feedback_too_high,
+       (select avg(((actual_total - estimated_total) / nullif(estimated_total, 0)) * 100) from unique_price_observations where created_at >= now() - make_interval(days => $1)) as average_grocery_error_pct,
+       (select avg(abs(((actual_total - estimated_total) / nullif(estimated_total, 0)) * 100)) from unique_price_observations where created_at >= now() - make_interval(days => $1)) as average_grocery_absolute_error_pct,
+       (select coalesce(sum(actual_total), 0) from unique_price_observations where created_at >= now() - make_interval(days => $1)) as actual_grocery_spend_captured,
        (select count(*) from valid_events where event_name = 'ai_request_completed' and created_at >= now() - make_interval(days => $1)) as ai_requests,
        (select count(*) from valid_events where event_name = 'ai_request_failed' and created_at >= now() - make_interval(days => $1)) as ai_failures,
        (select coalesce(sum(case when properties->>'inputTokens' ~ '^\\d+$' then (properties->>'inputTokens')::bigint else 0 end), 0) from valid_events where event_name = 'ai_request_completed' and created_at >= now() - make_interval(days => $1)) as ai_input_tokens,
@@ -295,6 +314,10 @@ export function formatAnalyticsSummary(row = {}, windowDays = 30) {
   const recipesSaved = toNumber(row.recipes_saved);
   const pricingEvaluations = toNumber(row.menu_pricing_evaluations);
   const feedbackResponses = toNumber(row.grocery_feedback_responses);
+  const uniqueCheckoutObservations = row.unique_checkout_observations === null
+    || row.unique_checkout_observations === undefined
+    ? feedbackResponses
+    : toNumber(row.unique_checkout_observations);
   const aiRequests = toNumber(row.ai_requests);
   const aiEstimatedCost = toNumber(row.ai_estimated_cost);
   const activeUsers = toNumber(row.monthly_active_users);
@@ -372,10 +395,12 @@ export function formatAnalyticsSummary(row = {}, windowDays = 30) {
     },
     groceryPriceIntelligence: {
       feedbackResponses,
+      uniqueCheckoutObservations,
+      contributors: toNumber(row.grocery_price_contributors),
       tooLow: toNumber(row.grocery_feedback_too_low),
       close: toNumber(row.grocery_feedback_close),
       tooHigh: toNumber(row.grocery_feedback_too_high),
-      closeRatePct: rate(toNumber(row.grocery_feedback_close), feedbackResponses),
+      closeRatePct: rate(toNumber(row.grocery_feedback_close), uniqueCheckoutObservations),
       averageSignedErrorPct: nullableNumber(row.average_grocery_error_pct),
       averageAbsoluteErrorPct: nullableNumber(row.average_grocery_absolute_error_pct),
       actualSpendCaptured: nullableMoney(row.actual_grocery_spend_captured),

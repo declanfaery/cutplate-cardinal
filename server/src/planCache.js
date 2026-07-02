@@ -303,6 +303,7 @@ function buildPlanFingerprint(preferences = {}) {
     servingsPerMeal: Number(preferences.servingsPerMeal || 0),
     allergies: normalizeList(preferences.allergies),
     location: normalizeText(preferences.location),
+    storeName: normalizeText(preferences.storeName),
     groceryBudgetTier: getBudgetTier(preferences),
     calorieTarget: Number(preferences.calorieTarget || 0),
     dietStyle: normalizeText(preferences.dietStyle),

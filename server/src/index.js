@@ -27,6 +27,24 @@ import {
 } from './planCache.js';
 import { confirmSignup, createSignup, deleteSignup } from './users.js';
 import { getAnalyticsSettings, getAnalyticsSummary, trackAnalyticsEvent } from './analytics.js';
+import {
+  deleteRecipePreferenceData,
+  getPreferenceLearningSummary,
+  getRecipePreferenceProfile,
+  personalizeRecipeLibrary
+} from './preferenceLearning.js';
+import {
+  buildPantryLearningGuidance,
+  buildPantryScanFeedback,
+  getPantryLearningProfile,
+  getPantryLearningSummary
+} from './pantryLearning.js';
+import {
+  deleteGroceryPriceObservations,
+  getPriceLearningSettings,
+  initializePriceLearning,
+  recordGroceryPriceFeedback
+} from './priceLearning.js';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -46,6 +64,7 @@ app.get('/api/health', (req, res) => {
     model: process.env.OPENAI_MODEL || 'gpt-5-nano',
     cache: getCacheSettings(),
     analytics: getAnalyticsSettings(),
+    priceLearning: getPriceLearningSettings(),
     aiTimeoutMs: getAiTimeoutMs(),
     fastFirst: shouldReturnFastFirst(),
     webSearch: shouldUseWebSearch(),
@@ -100,6 +119,14 @@ app.get('/api/confirm-email', async (req, res) => {
 app.post('/api/delete-account', async (req, res, next) => {
   try {
     await deleteSignup(req.body?.email);
+    const identity = {
+      userId: req.body?.userId,
+      email: req.body?.email
+    };
+    await Promise.all([
+      deleteRecipePreferenceData(identity),
+      deleteGroceryPriceObservations(identity)
+    ]);
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -110,6 +137,83 @@ app.post('/api/analytics/event', async (req, res, next) => {
   try {
     const result = await trackAnalyticsEvent(req.body || {});
     res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/grocery-feedback', async (req, res, next) => {
+  try {
+    const analyticsContext = req.body?.analyticsContext || {};
+    const feedback = {
+      ...(req.body?.feedback || req.body || {}),
+      userId: analyticsContext.userId,
+      email: analyticsContext.email,
+      anonymousId: analyticsContext.anonymousId,
+      appVersion: analyticsContext.appVersion,
+      platform: analyticsContext.platform
+    };
+    delete feedback.analyticsContext;
+
+    const result = await recordGroceryPriceFeedback(feedback);
+    if (!result.recorded) {
+      const {
+        estimatedLineItems,
+        lineItems,
+        userId,
+        email,
+        anonymousId,
+        appVersion,
+        platform,
+        ...analyticsProperties
+      } = feedback;
+      await trackAnalyticsEvent({
+        ...analyticsContext,
+        eventName: 'grocery_estimate_feedback',
+        properties: analyticsProperties
+      });
+      return res.status(201).json({
+        ok: true,
+        recorded: false,
+        learned: false,
+        directionalOnly: true,
+        reason: result.reason
+      });
+    }
+
+    const {
+      estimatedLineItems,
+      lineItems,
+      userId,
+      email,
+      anonymousId,
+      appVersion,
+      platform,
+      ...analyticsProperties
+    } = feedback;
+    if (result.created) {
+      await trackAnalyticsEvent({
+        ...analyticsContext,
+        eventName: 'grocery_estimate_feedback',
+        properties: {
+          ...analyticsProperties,
+          derivedRating: result.derivedRating,
+          feedbackId: result.feedbackId
+        }
+      });
+    } else {
+      await trackAnalyticsEvent({
+        ...analyticsContext,
+        eventName: 'grocery_estimate_feedback_updated',
+        properties: {
+          ...analyticsProperties,
+          derivedRating: result.derivedRating,
+          feedbackId: result.feedbackId
+        }
+      });
+    }
+
+    return res.status(result.created ? 201 : 200).json({ ok: true, ...result });
   } catch (error) {
     next(error);
   }
@@ -143,12 +247,62 @@ app.post('/api/analyze-pantry-photo', async (req, res, next) => {
       return res.status(413).json({ error: 'That photo is too large. Try a smaller image.' });
     }
 
+    const pantryLearningProfile = await getPantryLearningProfile(req.body?.analyticsContext);
     const analysis = await analyzePantryImage({
       imageBase64,
       mimeType,
-      analyticsContext: req.body?.analyticsContext
+      analyticsContext: req.body?.analyticsContext,
+      pantryLearningGuidance: buildPantryLearningGuidance(pantryLearningProfile)
     });
-    res.json(analysis);
+    res.json({
+      ...analysis,
+      pantryLearning: getPantryLearningSummary(pantryLearningProfile)
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/pantry-scan-feedback', async (req, res, next) => {
+  try {
+    const analyticsContext = req.body?.analyticsContext || {};
+    const feedback = buildPantryScanFeedback(req.body || {});
+    const learned = Boolean(
+      String(analyticsContext.userId || '').trim()
+      || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(analyticsContext.email || '').trim())
+    );
+    const {
+      detectedItems,
+      finalItems,
+      confirmedItems,
+      addedItems,
+      removedItems,
+      ...summary
+    } = feedback;
+
+    await trackAnalyticsEvent({
+      ...analyticsContext,
+      eventName: 'pantry_scan_confirmed',
+      properties: {
+        ...summary,
+        learned,
+        ...(learned
+          ? {
+              detectedItems,
+              finalItems,
+              confirmedItems,
+              addedItems,
+              removedItems
+            }
+          : {})
+      }
+    });
+
+    res.status(201).json({
+      ok: true,
+      learned,
+      ...summary
+    });
   } catch (error) {
     next(error);
   }
@@ -178,6 +332,7 @@ function requireAnalyticsAdminKey(req) {
 
 app.post('/api/pantry-recipes', async (req, res, next) => {
   try {
+    const preferenceProfile = await getRecipePreferenceProfile(req.body?.analyticsContext);
     const pantryIngredients = mergePantryIngredientText(
       req.body?.ingredients || req.body?.pantryIngredients || '',
       req.body?.pantryProtein || ''
@@ -216,10 +371,11 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
       : [];
     if (cachedPlanRecipes.length >= getPantryCacheMinRecipes()) {
       return res.json({
-        recipes: cachedPlanRecipes.slice(0, recipeCount),
+        recipes: personalizeRecipeLibrary(cachedPlanRecipes, preferenceProfile).slice(0, recipeCount),
         usedIngredients: splitPantryIngredients(pantryIngredients),
         note: 'Found previously gathered source matches for those pantry ingredients.',
-        cache: cached.cache
+        cache: cached.cache,
+        preferenceLearning: getPreferenceLearningSummary(preferenceProfile)
       });
     }
 
@@ -232,7 +388,7 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
       });
       if (cachedPantryRecipes.length >= getPantryCacheMinRecipes()) {
         return res.json({
-          recipes: cachedPantryRecipes.slice(0, recipeCount),
+          recipes: personalizeRecipeLibrary(cachedPantryRecipes, preferenceProfile).slice(0, recipeCount),
           usedIngredients: splitPantryIngredients(pantryIngredients),
           note: 'Found cached recipe matches for those pantry ingredients.',
           cache: {
@@ -240,7 +396,8 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
             source: 'recipe-index',
             count: cachedPantryRecipes.length,
             key: buildPlanCacheKey(cachePreferences)
-          }
+          },
+          preferenceLearning: getPreferenceLearningSummary(preferenceProfile)
         });
       }
     }
@@ -331,10 +488,12 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
 
     return res.json({
       ...pantryResponse,
+      recipes: personalizeRecipeLibrary(pantryResponse.recipes, preferenceProfile),
       cache: {
         hit: false,
         key: buildPlanCacheKey(cachePreferences)
-      }
+      },
+      preferenceLearning: getPreferenceLearningSummary(preferenceProfile)
     });
   } catch (error) {
     next(error);
@@ -343,23 +502,28 @@ app.post('/api/pantry-recipes', async (req, res, next) => {
 
 app.post('/api/plan', async (req, res) => {
   const preferences = normalizePreferences(req.body);
+  const preferenceProfile = await getRecipePreferenceProfile(req.body?.analyticsContext);
   const forceFresh = parseBoolean(req.body?.forceFresh) || Boolean(preferences.recipeVariant);
   const cached = forceFresh ? null : await getCachedPlan(preferences);
   const aiConfigured = Boolean(process.env.OPENAI_API_KEY);
 
   if (cached && (!aiConfigured || cached.mode === 'ai') && hasEnoughMenuRecipeOptions(cached.plan, preferences)) {
-    return res.json(cached);
+    return res.json(personalizePlanResponse(cached, preferenceProfile));
   }
 
   if (preferences.recipeVarietyMode === 'same') {
     const savedResponse = buildSavedRecipePlanResponse(preferences);
     await setCachedPlan(preferences, savedResponse);
-    return res.json(stampUncachedResponse(savedResponse, preferences));
+    return res.json(personalizePlanResponse(
+      stampUncachedResponse(savedResponse, preferences),
+      preferenceProfile,
+      { allowExactRepeats: true }
+    ));
   }
 
   const cachedRecipeResponse = forceFresh ? null : await buildCachedRecipePlanResponse(preferences);
   if (cachedRecipeResponse) {
-    return res.json(cachedRecipeResponse);
+    return res.json(personalizePlanResponse(cachedRecipeResponse, preferenceProfile));
   }
 
   if (aiConfigured) {
@@ -372,12 +536,18 @@ app.post('/api/plan', async (req, res) => {
         warnings: ['Showing local development recipes because ALLOW_LOCAL_RECIPE_FALLBACK is enabled.'],
         mode: 'local'
       };
-      return res.json(stampUncachedResponse(localResponse, preferences));
+      return res.json(personalizePlanResponse(
+        stampUncachedResponse(localResponse, preferences),
+        preferenceProfile
+      ));
     }
 
     try {
       const aiResponse = await waitForRecipePlan(aiResponsePromise);
-      return res.json(stampUncachedResponse(aiResponse, preferences));
+      return res.json(personalizePlanResponse(
+        stampUncachedResponse(aiResponse, preferences),
+        preferenceProfile
+      ));
     } catch (error) {
       return res.status(error?.code === 'ETIMEDOUT' ? 504 : 502).json({
         error: getAiPlanError(error),
@@ -404,7 +574,10 @@ app.post('/api/plan', async (req, res) => {
   };
   await setCachedPlan(preferences, localResponse);
 
-  return res.json(stampUncachedResponse(localResponse, preferences));
+  return res.json(personalizePlanResponse(
+    stampUncachedResponse(localResponse, preferences),
+    preferenceProfile
+  ));
 });
 
 app.post('/api/estimate', (req, res) => {
@@ -446,6 +619,10 @@ app.use((req, res) => {
 app.use((error, req, res, next) => {
   console.error(error);
   res.status(error.status || 500).json({ error: error.status ? error.message : 'Something went wrong while building the plan.' });
+});
+
+await initializePriceLearning().catch((error) => {
+  console.warn('Price learning startup failed:', error?.message || error);
 });
 
 app.listen(port, () => {
@@ -927,6 +1104,28 @@ function buildSavedRecipePlanResponse(preferences) {
     plan: savedPlan,
     warnings: ['Showing saved repeat recipes. Pick one or more favorites and I will scale the grocery list across your selected days.'],
     mode: 'saved'
+  };
+}
+
+function personalizePlanResponse(response = {}, preferenceProfile = null, options = {}) {
+  if (!response?.plan || !preferenceProfile?.signalCount) {
+    return {
+      ...response,
+      preferenceLearning: getPreferenceLearningSummary(preferenceProfile)
+    };
+  }
+
+  return {
+    ...response,
+    plan: {
+      ...response.plan,
+      recipeLibrary: personalizeRecipeLibrary(
+        response.plan.recipeLibrary || [],
+        preferenceProfile,
+        options
+      )
+    },
+    preferenceLearning: getPreferenceLearningSummary(preferenceProfile)
   };
 }
 

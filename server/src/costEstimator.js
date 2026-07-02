@@ -1,3 +1,5 @@
+import { getLearnedPriceAdjustment } from './priceLearning.js';
+
 const LOCATION_MULTIPLIERS = [
   { pattern: /\b(new york|nyc|manhattan|brooklyn|san francisco|sf|bay area|los angeles|la|seattle|boston|washington dc|dc)\b/i, multiplier: 1.24 },
   { pattern: /\b(california|ca|new jersey|nj|massachusetts|ma|washington|wa|oregon|or|colorado|co)\b/i, multiplier: 1.14 },
@@ -250,7 +252,10 @@ export function buildAssignedMealPlan(plan, assignments = []) {
 export function estimateGroceryCost(plan, preferences = {}) {
   const servings = clamp(Number(preferences.servingsPerMeal || plan.preferences?.servingsPerMeal || 2), 1, 12);
   const location = String(preferences.location || plan.preferences?.location || '').trim();
-  const pricing = getLocationPricingProfile(location);
+  const pricing = getEffectivePricingProfile(location, {
+    ...(plan.preferences || {}),
+    ...preferences
+  });
   const items = collectPricedItems(plan, servings);
   const lineItems = buildLineItems(items, pricing.priceMultiplier);
 
@@ -265,13 +270,15 @@ export function estimateGroceryCost(plan, preferences = {}) {
     currency: pricing.currency,
     currencySymbol: pricing.currencySymbol,
     regionalMultiplier: Math.round(pricing.regionalMultiplier * 100) / 100,
+    learnedMultiplier: roundMultiplier(pricing.learnedMultiplier),
+    priceLearning: pricing.priceLearning,
     estimatedTotal,
     rangeLow: roundMoney(estimatedTotal * 0.85),
     rangeHigh: roundMoney(estimatedTotal * 1.18),
     pantryBuffer: roundMoney(pantryBuffer),
     lineItems,
     note:
-      `${pricing.label} estimate from generated ingredients, servings, store-style package sizes, and regional grocery pricing. Exact prices vary by store, brand, season, and sale pricing.`
+      `${pricing.label} estimate from generated ingredients, servings, store-style package sizes, and regional grocery pricing.${formatPriceLearningNote(pricing.priceLearning)} Exact prices vary by store, brand, season, and sale pricing.`
   };
 }
 
@@ -861,6 +868,38 @@ function getLocationPricingProfile(location) {
   };
 }
 
+function getEffectivePricingProfile(location, preferences = {}) {
+  const pricing = getLocationPricingProfile(location);
+  const priceLearning = getLearnedPriceAdjustment({
+    market: pricing.key,
+    currency: pricing.currency,
+    storeName: preferences.storeName || preferences.groceryStore || preferences.store
+  });
+  const learnedMultiplier = Number(priceLearning.multiplier || 1);
+
+  return {
+    ...pricing,
+    learnedMultiplier,
+    priceLearning: priceLearning.applied ? {
+      source: priceLearning.source,
+      samples: priceLearning.samples,
+      distinctIdentities: priceLearning.distinctIdentities,
+      confidence: roundMultiplier(priceLearning.confidence),
+      multiplier: roundMultiplier(learnedMultiplier),
+      averageRatio: roundMultiplier(priceLearning.averageRatio || learnedMultiplier),
+      updatedAt: priceLearning.updatedAt || null
+    } : null,
+    priceMultiplier: pricing.priceMultiplier * learnedMultiplier
+  };
+}
+
+function formatPriceLearningNote(priceLearning) {
+  if (!priceLearning) return ' ';
+
+  const sampleLabel = `${priceLearning.samples} ${priceLearning.source === 'store' ? 'store' : 'market'} feedback sample${priceLearning.samples === 1 ? '' : 's'}`;
+  return ` Adjusted with ${sampleLabel}.`;
+}
+
 function normalizeFallbackName(value) {
   return normalizeIngredientForPricing(value || 'Pantry item')
     .replace(/^\d+(\.\d+)?\s*/g, '')
@@ -880,6 +919,10 @@ function roundMoney(value) {
   return Math.round(value * 100) / 100;
 }
 
+function roundMultiplier(value) {
+  return Math.round(Number(value || 1) * 1000) / 1000;
+}
+
 function clamp(value, min, max) {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
@@ -888,7 +931,7 @@ function clamp(value, min, max) {
 function estimateSingleMealCost(meal, preferences = {}) {
   const servings = clamp(Number(preferences.servingsPerMeal || 2), 1, 12);
   const location = String(preferences.location || '').trim();
-  const pricing = getLocationPricingProfile(location);
+  const pricing = getEffectivePricingProfile(location, preferences);
   const items = collectPricedItems({ days: [{ meals: [meal] }] }, servings);
   const subtotal = buildLineItems(items, pricing.priceMultiplier).reduce((total, item) => total + item.estimatedCost, 0);
 

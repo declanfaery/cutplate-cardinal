@@ -10,6 +10,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -30,13 +31,16 @@ import {
   Clock,
   DollarSign,
   ExternalLink,
+  Heart,
+  History,
   ImagePlus,
   MapPin,
   Plus,
   RefreshCw,
   ShoppingCart,
   Sparkles,
-  Trash2
+  Trash2,
+  UserPlus
 } from 'lucide-react-native';
 
 const API_URL =
@@ -80,6 +84,41 @@ const ALLERGY_OPTIONS = [
 ];
 const DIET_STYLES = ['Balanced', 'High protein', 'Low carb', 'Mediterranean'];
 const SOURCE_OPTIONS = ['@roadtoaesthetics', '@noahperlofit', '@fairfiteats', '@nickazfit'];
+const RECIPE_PREFERENCE_INGREDIENTS = [
+  'avocado',
+  'beans',
+  'bell pepper',
+  'broccoli',
+  'brown rice',
+  'cabbage',
+  'carrot',
+  'cauliflower',
+  'cheddar',
+  'chickpeas',
+  'cottage cheese',
+  'cucumber',
+  'egg',
+  'feta',
+  'greek yogurt',
+  'kale',
+  'lentils',
+  'mushroom',
+  'mozzarella',
+  'oats',
+  'onion',
+  'parmesan',
+  'peas',
+  'pesto',
+  'potato',
+  'quinoa',
+  'rice',
+  'salsa',
+  'spinach',
+  'sweet potato',
+  'tomato',
+  'tortilla',
+  'zucchini'
+];
 const SERVING_OPTIONS = [
   { value: 1, title: '1 serving', subtitle: 'just for you' },
   { value: 2, title: '2 servings', subtitle: 'for two, or one with leftovers' },
@@ -102,7 +141,10 @@ const USER_STORAGE_KEY = 'cutplate:user:v1';
 const ONBOARDING_COMPLETE_STORAGE_KEY = 'cutplate:onboarding-complete:v1';
 const CALENDAR_STORAGE_KEY = 'cutplate:calendar:v1';
 const SHOPPING_LIST_STORAGE_KEY = 'cutplate:shopping-list:v1';
+const PRICE_FEEDBACK_PROMPT_STORAGE_KEY = 'cutplate:price-feedback-prompt:v1';
 const SAVED_RECIPES_STORAGE_KEY = 'cutplate:saved-recipes:v1';
+const RECIPE_HISTORY_STORAGE_KEY = 'cutplate:recipe-history:v1';
+const PREFERRED_STORE_STORAGE_KEY = 'cutplate:preferred-store:v1';
 const ANALYTICS_ID_STORAGE_KEY = 'cutplate:analytics-id:v1';
 const KEYBOARD_ACCESSORY_ID = 'cutplate-keyboard-done';
 const KEYBOARD_DISMISS_MODE = Platform.OS === 'ios' ? 'interactive' : 'on-drag';
@@ -134,7 +176,12 @@ export default function App() {
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [calendarMeals, setCalendarMeals] = useState([]);
   const [latestShoppingPlan, setLatestShoppingPlan] = useState(null);
+  const [pendingPriceFeedbackPlan, setPendingPriceFeedbackPlan] = useState(null);
+  const [priceFeedbackPromptVisible, setPriceFeedbackPromptVisible] = useState(false);
+  const [priceFeedbackPromptStep, setPriceFeedbackPromptStep] = useState('ask');
+  const [accountPromptContext, setAccountPromptContext] = useState(null);
   const [savedRecipes, setSavedRecipes] = useState([]);
+  const [recipeHistory, setRecipeHistory] = useState([]);
   const [appMode, setAppMode] = useState('home');
   const [step, setStep] = useState(0);
   const [days, setDays] = useState(5);
@@ -149,6 +196,7 @@ export default function App() {
   const [avoidIngredients, setAvoidIngredients] = useState('');
   const [pantryIngredients, setPantryIngredients] = useState('');
   const [shoppingLocation, setShoppingLocation] = useState('');
+  const [preferredStoreName, setPreferredStoreName] = useState('');
   const [sourceHandles, setSourceHandles] = useState(SOURCE_OPTIONS);
   const [recipeVarietyMode, setRecipeVarietyMode] = useState('different');
   const [plan, setPlan] = useState(null);
@@ -173,6 +221,7 @@ export default function App() {
   const [pantrySearchError, setPantrySearchError] = useState('');
   const [pantrySearchNote, setPantrySearchNote] = useState('');
   const [pantryScanStatus, setPantryScanStatus] = useState('idle');
+  const [pantryScanFeedbackSubmitted, setPantryScanFeedbackSubmitted] = useState(false);
   const [pantryStep, setPantryStep] = useState(0);
   const [pantryVisibleRecipeCount, setPantryVisibleRecipeCount] = useState(3);
   const [activeCalendarMeal, setActiveCalendarMeal] = useState(null);
@@ -185,12 +234,17 @@ export default function App() {
   const sessionStartedAtRef = useRef(Date.now());
   const hasTrackedSessionStart = useRef(false);
   const lastScreenViewRef = useRef('');
+  const guestPlanPromptedRef = useRef('');
 
   const enabledSlots = useMemo(() => mealSlots.filter((slot) => slot.enabled), [mealSlots]);
   const stepCount = 12;
   const atLastStep = step === stepCount - 1;
   const activeResultPlan = selectedMenuPlan || plan;
   const activeDay = activeResultPlan?.days?.[selectedDay] || activeResultPlan?.days?.[0];
+  const reusableCalendarRecipeCount = useMemo(
+    () => getReusableCalendarRecipes(calendarMeals).length,
+    [calendarMeals]
+  );
   const targetSlots = useMemo(() => getTargetSlots(plan), [plan]);
   const mealOptions = useMemo(() => getMealOptions(plan, cachedRecipes, pantryIngredients), [cachedRecipes, pantryIngredients, plan]);
   const selectedMeals = useMemo(() => getSelectedMealOptions(mealOptions, selectedMealIds), [mealOptions, selectedMealIds]);
@@ -199,6 +253,10 @@ export default function App() {
   const assignedMeals = useMemo(
     () => buildAssignmentsFromSelected(targetSlots, selectedMeals, recipeVarietyMode === 'same'),
     [recipeVarietyMode, selectedMeals, targetSlots]
+  );
+  const menuRequirementsMet = useMemo(
+    () => areMealRequirementsMet(mealTypeRequirements, selectedCounts, recipeVarietyMode),
+    [mealTypeRequirements, recipeVarietyMode, selectedCounts]
   );
   const selectedMealCount = selectedMeals.length;
   const fallbackMenuEstimate = useMemo(
@@ -220,27 +278,61 @@ export default function App() {
         storedOnboardingComplete,
         storedCalendarMeals,
         storedShoppingPlan,
+        storedPriceFeedbackPrompt,
         storedSavedRecipes,
+        storedRecipeHistory,
+        storedPreferredStore,
         storedAnalyticsId
       ] = await Promise.all([
         loadStoredJson(USER_STORAGE_KEY, null),
         loadStoredJson(ONBOARDING_COMPLETE_STORAGE_KEY, false),
         loadStoredJson(CALENDAR_STORAGE_KEY, []),
         loadStoredJson(SHOPPING_LIST_STORAGE_KEY, null),
+        loadStoredJson(PRICE_FEEDBACK_PROMPT_STORAGE_KEY, null),
         loadStoredJson(SAVED_RECIPES_STORAGE_KEY, []),
+        loadStoredJson(RECIPE_HISTORY_STORAGE_KEY, []),
+        loadStoredJson(PREFERRED_STORE_STORAGE_KEY, ''),
         getOrCreateAnalyticsId()
       ]);
 
       if (cancelled) return;
       analyticsIdRef.current = storedAnalyticsId;
       setAnalyticsId(storedAnalyticsId);
-      setViewer(storedViewer);
-      setHasCompletedOnboarding(Boolean(storedOnboardingComplete || storedViewer));
-      setCalendarMeals(Array.isArray(storedCalendarMeals) ? storedCalendarMeals : []);
-      setLatestShoppingPlan(storedShoppingPlan && typeof storedShoppingPlan === 'object' ? storedShoppingPlan : null);
-      setSavedRecipes(Array.isArray(storedSavedRecipes) ? storedSavedRecipes : []);
+      const hasAccount = Boolean(storedViewer?.id && storedViewer?.email);
+      setViewer(hasAccount ? storedViewer : null);
+      setHasCompletedOnboarding(Boolean(storedOnboardingComplete || hasAccount));
+      setCalendarMeals(hasAccount && Array.isArray(storedCalendarMeals) ? storedCalendarMeals : []);
+      setLatestShoppingPlan(
+        hasAccount && storedShoppingPlan && typeof storedShoppingPlan === 'object'
+          ? storedShoppingPlan
+          : null
+      );
+      if (hasAccount && hasShoppingPlan(storedPriceFeedbackPrompt)) {
+        setPendingPriceFeedbackPlan(storedPriceFeedbackPrompt);
+        setPriceFeedbackPromptStep('ask');
+        setPriceFeedbackPromptVisible(true);
+      }
+      const accountSavedRecipes = hasAccount && Array.isArray(storedSavedRecipes) ? storedSavedRecipes : [];
+      const accountCalendarMeals = hasAccount && Array.isArray(storedCalendarMeals) ? storedCalendarMeals : [];
+      const storedHistory = hasAccount && Array.isArray(storedRecipeHistory) ? storedRecipeHistory : [];
+      const initialHistory = buildInitialRecipeHistory(storedHistory, accountSavedRecipes, accountCalendarMeals);
+      setSavedRecipes(accountSavedRecipes);
+      setRecipeHistory(initialHistory);
+      setPreferredStoreName(hasAccount ? String(storedPreferredStore || '') : '');
       setSignupName(storedViewer?.name || '');
       setSignupEmail(storedViewer?.email || '');
+      if (!hasAccount) {
+        await AsyncStorage.multiRemove([
+          CALENDAR_STORAGE_KEY,
+          SHOPPING_LIST_STORAGE_KEY,
+          PRICE_FEEDBACK_PROMPT_STORAGE_KEY,
+          SAVED_RECIPES_STORAGE_KEY,
+          RECIPE_HISTORY_STORAGE_KEY,
+          PREFERRED_STORE_STORAGE_KEY
+        ]);
+      } else if (!storedHistory.length && initialHistory.length) {
+        await saveStoredJson(RECIPE_HISTORY_STORAGE_KEY, initialHistory);
+      }
       setHasBooted(true);
     };
 
@@ -367,6 +459,19 @@ export default function App() {
     step
   ]);
 
+  useEffect(() => {
+    if (!hasBooted || viewer?.id || !plan || planStage !== 'recipes') return;
+    const planKey = String(plan.id || plan.generatedAt || '');
+    if (!planKey || guestPlanPromptedRef.current === planKey) return;
+
+    guestPlanPromptedRef.current = planKey;
+    setAccountPromptContext('plan_ready');
+    void trackEvent('guest_account_prompt_shown', {
+      context: 'plan_ready',
+      planId: planKey
+    });
+  }, [hasBooted, plan, planStage, viewer?.id]);
+
   const startGuidedPlan = () => {
     void trackEvent('meal_plan_started', {
       days,
@@ -379,6 +484,53 @@ export default function App() {
     setSelectedMealIds([]);
     setStep(0);
     setAppMode('wizard');
+  };
+
+  const startPlanAgain = () => {
+    const repeatPlan = buildPlanAgainPlan({
+      calendarMeals,
+      latestShoppingPlan
+    });
+
+    if (!repeatPlan) {
+      setError('Add a meal plan to your calendar first, then I can reuse those recipes next week.');
+      setAppMode('home');
+      return;
+    }
+
+    const preferences = repeatPlan.preferences || {};
+    setError('');
+    setWarnings(['Starting from your last calendar. Pick any recipes you want again, and I can find fresh options for the open spots.']);
+    setPlan(repeatPlan);
+    setSelectedMenuPlan(null);
+    setSelectedMealIds([]);
+    setPlanStage('menu');
+    setSelectedDay(0);
+    setDays(Number(preferences.days || 5));
+    setWeekdaysOnly(Boolean(preferences.weekdaysOnly));
+    setSelectedProteins(
+      Array.isArray(preferences.proteins) && preferences.proteins.length
+        ? preferences.proteins
+        : getProteinMixValues(repeatPlan.recipeLibrary)
+    );
+    setMealSlots(mergeMealSlotsFromPreferences(preferences.mealSlots));
+    setAllergies(Array.isArray(preferences.allergies) ? preferences.allergies : []);
+    setServingsPerMeal(Math.max(1, Number(preferences.servingsPerMeal || 2)));
+    setDietStyle(preferences.dietStyle || 'High protein');
+    setCalorieTarget(String(preferences.calorieTarget || 600));
+    setAvoidIngredients(preferences.avoidIngredients || '');
+    setPantryIngredients(preferences.pantryIngredients || '');
+    setShoppingLocation(preferences.location || '');
+    setPreferredStoreName(preferences.storeName || preferredStoreName);
+    setSourceHandles(Array.isArray(preferences.sourceHandles) ? preferences.sourceHandles : SOURCE_OPTIONS);
+    setRecipeVarietyMode('different');
+    setBudgetTarget(String(preferences.groceryBudget || latestShoppingPlan?.groceryEstimate?.estimatedTotal || 75));
+    void trackEvent('plan_again_started', {
+      previousCalendarMeals: calendarMeals.length,
+      reusableRecipes: repeatPlan.recipeLibrary.length,
+      days: preferences.days,
+      mealsPerDay: preferences.mealSlots?.length || 0
+    });
   };
 
   const startPantryFinder = () => {
@@ -394,7 +546,10 @@ export default function App() {
     setPantrySearchNote('');
     setPantryPhotoUri('');
     setPantryDetectedIngredients([]);
+    setPantryIngredients('');
+    setPantryProteinInput('');
     setPantryScanStatus('idle');
+    setPantryScanFeedbackSubmitted(false);
     setPantryStep(0);
     setPantryVisibleRecipeCount(3);
     setAppMode('pantry');
@@ -403,6 +558,7 @@ export default function App() {
   const completeOnboardingAsGuest = async () => {
     setSignupError('');
     setSignupNotice('');
+    setAccountPromptContext(null);
     setHasCompletedOnboarding(true);
     await saveStoredJson(ONBOARDING_COMPLETE_STORAGE_KEY, true);
     void trackEvent('onboarding_completed', { method: 'guest' });
@@ -416,6 +572,31 @@ export default function App() {
     setSignupEmail(viewer?.email || '');
     setOnboardingIndex(ONBOARDING_SLIDES.length);
     setAppMode('profile');
+  };
+
+  const updatePreferredStoreName = (value) => {
+    setPreferredStoreName(value);
+    if (viewer?.id) {
+      void saveStoredJson(PREFERRED_STORE_STORAGE_KEY, value.trim());
+    }
+  };
+
+  const promptForAccount = (context) => {
+    setAccountPromptContext(context);
+    void trackEvent('guest_account_prompt_shown', { context });
+  };
+
+  const dismissAccountPrompt = () => {
+    const context = accountPromptContext;
+    setAccountPromptContext(null);
+    void trackEvent('guest_account_prompt_dismissed', { context });
+  };
+
+  const createAccountFromPrompt = () => {
+    const context = accountPromptContext;
+    setAccountPromptContext(null);
+    void trackEvent('guest_account_prompt_accepted', { context });
+    startProfileSetup();
   };
 
   const submitSignup = async () => {
@@ -459,8 +640,12 @@ export default function App() {
 
       await saveStoredJson(USER_STORAGE_KEY, profile);
       await saveStoredJson(ONBOARDING_COMPLETE_STORAGE_KEY, true);
+      if (preferredStoreName.trim()) {
+        await saveStoredJson(PREFERRED_STORE_STORAGE_KEY, preferredStoreName.trim());
+      }
       setViewer(profile);
       setHasCompletedOnboarding(true);
+      setAccountPromptContext(null);
       setSignupNotice(data.emailSent ? 'Confirmation email sent.' : 'Confirmation link created for local testing.');
       void trackEvent('profile_saved', {
         analyticsUserId: profile.id,
@@ -475,7 +660,19 @@ export default function App() {
     }
   };
 
+  const rememberRecipes = async (recipes, action, occurredAt = new Date().toISOString()) => {
+    if (!viewer?.id) return;
+    const nextHistory = mergeRecipeHistory(recipeHistory, recipes, action, occurredAt);
+    setRecipeHistory(nextHistory);
+    await saveStoredJson(RECIPE_HISTORY_STORAGE_KEY, nextHistory);
+  };
+
   const saveRecipeToShelf = async (recipe) => {
+    if (!viewer?.id) {
+      promptForAccount('save_recipe');
+      return false;
+    }
+
     const savedRecipe = {
       ...sanitizeCalendarRecipe(recipe),
       savedAt: new Date().toISOString()
@@ -488,7 +685,10 @@ export default function App() {
     ].slice(0, 60);
 
     setSavedRecipes(nextRecipes);
-    await saveStoredJson(SAVED_RECIPES_STORAGE_KEY, nextRecipes);
+    await Promise.all([
+      saveStoredJson(SAVED_RECIPES_STORAGE_KEY, nextRecipes),
+      rememberRecipes([savedRecipe], 'liked', savedRecipe.savedAt)
+    ]);
     void trackEvent('recipe_saved', {
       ...getRecipeAnalyticsProperties(savedRecipe),
       ...history,
@@ -501,6 +701,7 @@ export default function App() {
         ...history
       });
     }
+    return true;
   };
 
   const removeSavedRecipe = async (recipe) => {
@@ -531,8 +732,32 @@ export default function App() {
     setAppMode('calendar-recipe');
   };
 
+  const openHistoryRecipe = (entry) => {
+    const storedRecipe = sanitizeCalendarRecipe(entry?.recipe || entry);
+    setError('');
+    setActiveCalendarMeal({
+      id: `history-${storedRecipe.id || normalizeRecipeName(storedRecipe.name)}`,
+      mealType: storedRecipe.mealType,
+      time: storedRecipe.time,
+      name: storedRecipe.name,
+      calories: storedRecipe.macros?.calories || 0,
+      protein: storedRecipe.macros?.protein || 0,
+      recipe: storedRecipe
+    });
+    void trackEvent('recipe_history_opened', {
+      ...getRecipeAnalyticsProperties(storedRecipe),
+      historyActions: getRecipeHistoryActionKeys(entry)
+    });
+    setAppMode('calendar-recipe');
+  };
+
 
   const handleAddPlanToCalendar = async (calendarPlan) => {
+    if (!viewer?.id) {
+      promptForAccount('save_calendar');
+      return false;
+    }
+
     const meals = buildCalendarMeals(calendarPlan);
     const shoppingPlan = buildStoredShoppingPlan(calendarPlan);
     const repeatedMeals = meals.filter((meal) => {
@@ -541,9 +766,14 @@ export default function App() {
     });
     setCalendarMeals(meals);
     setLatestShoppingPlan(shoppingPlan);
+    setPendingPriceFeedbackPlan(shoppingPlan);
+    setPriceFeedbackPromptStep('ask');
+    setPriceFeedbackPromptVisible(true);
     await Promise.all([
       saveStoredJson(CALENDAR_STORAGE_KEY, meals),
-      saveStoredJson(SHOPPING_LIST_STORAGE_KEY, shoppingPlan)
+      saveStoredJson(SHOPPING_LIST_STORAGE_KEY, shoppingPlan),
+      saveStoredJson(PRICE_FEEDBACK_PROMPT_STORAGE_KEY, shoppingPlan),
+      rememberRecipes(meals.map((meal) => meal.recipe || meal), 'planned')
     ]);
     setPlan(null);
     setSelectedMenuPlan(null);
@@ -568,7 +798,14 @@ export default function App() {
         ? Number(((repeatedMeals.length / meals.length) * 100).toFixed(1))
         : 0
     });
+    for (const meal of uniqueRecipesByName(meals)) {
+      void trackEvent('recipe_added_to_calendar', {
+        source: 'meal_plan',
+        ...getRecipeAnalyticsProperties(meal?.recipe || meal)
+      });
+    }
     setAppMode('home');
+    return true;
   };
 
   const openCalendarMeal = (meal) => {
@@ -587,13 +824,21 @@ export default function App() {
   };
 
   const handleAddPantryRecipeToCalendar = async (recipe, date) => {
+    if (!viewer?.id) {
+      promptForAccount('save_calendar');
+      return false;
+    }
+
     const meal = buildCalendarMealFromRecipe(recipe, date);
     const history = getRecipeHistoryAnalytics(recipe, savedRecipes, calendarMeals);
     const nextMeals = [...calendarMeals.filter((item) => item.id !== meal.id), meal]
       .sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')));
 
     setCalendarMeals(nextMeals);
-    await saveStoredJson(CALENDAR_STORAGE_KEY, nextMeals);
+    await Promise.all([
+      saveStoredJson(CALENDAR_STORAGE_KEY, nextMeals),
+      rememberRecipes([recipe], 'planned')
+    ]);
     void trackEvent('calendar_meal_added', {
       source: 'pantry',
       ...getRecipeAnalyticsProperties(recipe),
@@ -610,6 +855,7 @@ export default function App() {
     setPantrySearchNote(`${recipe.name} added to ${formatLongDate(date)}.`);
     setPantrySearchError('');
     setAppMode('home');
+    return true;
   };
 
   const viewShoppingList = () => {
@@ -626,7 +872,7 @@ export default function App() {
     setAppMode('shopping');
   };
 
-  const submitGroceryEstimateFeedback = (feedback = {}, feedbackPlan = null) => {
+  const submitGroceryEstimateFeedback = async (feedback = {}, feedbackPlan = null) => {
     const estimate = feedbackPlan?.groceryEstimate;
     const estimatedTotal = toFiniteAnalyticsNumber(estimate?.estimatedTotal);
     const actualTotal = toFiniteAnalyticsNumber(feedback.actualTotal);
@@ -637,19 +883,86 @@ export default function App() {
       ? Number(((actualTotal - estimatedTotal) / estimatedTotal * 100).toFixed(1))
       : null;
 
-    void trackEvent('grocery_estimate_feedback', {
-      rating: feedback.rating || null,
-      storeName: cleanAnalyticsLabel(feedback.storeName, 80),
-      estimatedTotal,
-      actualTotal,
-      absoluteError,
-      errorPct,
-      ...getGroceryAnalyticsProperties(
-        estimate,
-        feedbackPlan?.preferences?.location,
-        feedbackPlan?.preferences?.groceryBudget
-      )
+    try {
+      const storeName = cleanAnalyticsLabel(feedback.storeName, 80);
+      const response = await fetchWithRetry(`${API_URL}/api/grocery-feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedback: {
+            feedbackId: buildGroceryFeedbackId(
+              feedbackPlan,
+              analyticsIdRef.current || analyticsId
+            ),
+            planId: String(feedbackPlan?.id || '').trim() || null,
+            rating: feedback.rating || null,
+            storeName,
+            estimatedTotal,
+            actualTotal,
+            absoluteError,
+            errorPct,
+            estimatedLineItems: Array.isArray(estimate?.lineItems) ? estimate.lineItems : [],
+            ...getGroceryAnalyticsProperties(
+              estimate,
+              feedbackPlan?.preferences?.location,
+              feedbackPlan?.preferences?.groceryBudget
+            )
+          },
+          analyticsContext: getAnalyticsContext()
+        })
+      }, 1);
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      if (storeName) updatePreferredStoreName(storeName);
+      if (isSameFeedbackPlan(feedbackPlan, pendingPriceFeedbackPlan)) {
+        await clearPendingPriceFeedback();
+      }
+      return true;
+    } catch (requestError) {
+      setError(formatApiFailure('Could not save grocery feedback', requestError));
+      return false;
+    }
+  };
+
+  const clearPendingPriceFeedback = async () => {
+    setPendingPriceFeedbackPlan(null);
+    setPriceFeedbackPromptVisible(false);
+    setPriceFeedbackPromptStep('ask');
+    await AsyncStorage.removeItem(PRICE_FEEDBACK_PROMPT_STORAGE_KEY);
+  };
+
+  const handlePriceFeedbackPromptAnswer = async (answer) => {
+    if (answer === 'yes') {
+      setPriceFeedbackPromptStep('form');
+      void trackEvent('grocery_feedback_prompt_answered', {
+        answer,
+        hasPendingPlan: Boolean(pendingPriceFeedbackPlan)
+      });
+      return;
+    }
+
+    if (answer === 'not_yet') {
+      setPriceFeedbackPromptVisible(false);
+      setPriceFeedbackPromptStep('ask');
+      void trackEvent('grocery_feedback_prompt_answered', {
+        answer,
+        hasPendingPlan: Boolean(pendingPriceFeedbackPlan)
+      });
+      return;
+    }
+
+    void trackEvent('grocery_feedback_prompt_answered', {
+      answer: 'no',
+      hasPendingPlan: Boolean(pendingPriceFeedbackPlan)
     });
+    await clearPendingPriceFeedback();
+  };
+
+  const submitPromptGroceryEstimateFeedback = async (feedback = {}, feedbackPlan = null) => {
+    return submitGroceryEstimateFeedback(feedback, feedbackPlan);
   };
 
   const openRecipeSource = (source, recipe) => {
@@ -666,8 +979,11 @@ export default function App() {
     const clearedMealCount = calendarMeals.length;
     setCalendarMeals([]);
     setLatestShoppingPlan(null);
+    setPendingPriceFeedbackPlan(null);
+    setPriceFeedbackPromptVisible(false);
+    setPriceFeedbackPromptStep('ask');
     setActiveCalendarMeal(null);
-    await AsyncStorage.multiRemove([CALENDAR_STORAGE_KEY, SHOPPING_LIST_STORAGE_KEY]);
+    await AsyncStorage.multiRemove([CALENDAR_STORAGE_KEY, SHOPPING_LIST_STORAGE_KEY, PRICE_FEEDBACK_PROMPT_STORAGE_KEY]);
     void trackEvent('calendar_cleared', { clearedMealCount });
   };
 
@@ -693,6 +1009,21 @@ export default function App() {
     setPantryVisibleRecipeCount(3);
     setPantrySearchError('');
     setPantrySearchNote('');
+  };
+
+  const addPantryReviewIngredient = (value) => {
+    const ingredient = String(value || '').trim();
+    if (!ingredient) return;
+    updatePantryFinderIngredients(mergeIngredientText(pantryIngredients, [ingredient]));
+  };
+
+  const removePantryReviewIngredient = (value) => {
+    const remainingIngredients = splitRawIngredients(pantryIngredients)
+      .filter((ingredient) => !ingredientsOverlap(ingredient, value));
+    const remainingProteins = splitRawIngredients(pantryProteinInput)
+      .filter((ingredient) => !ingredientsOverlap(ingredient, value));
+    updatePantryFinderIngredients(remainingIngredients.join(', '));
+    updatePantryFinderProtein(remainingProteins.join(', '));
   };
 
   const pickPantryPhoto = async () => {
@@ -746,6 +1077,7 @@ export default function App() {
     setPantryScanStatus('scanning');
     setPantryPhotoUri(asset.uri || '');
     setPantryDetectedIngredients([]);
+    setPantryScanFeedbackSubmitted(false);
     const startedAt = Date.now();
 
     try {
@@ -769,10 +1101,8 @@ export default function App() {
       const proteins = Array.isArray(data.proteins) ? data.proteins : [];
 
       setPantryDetectedIngredients(detected);
-      setPantryIngredients((current) => mergeIngredientText(current, ingredientNames));
-      if (!pantryProteinInput.trim() && proteins.length) {
-        setPantryProteinInput(proteins.join(', '));
-      }
+      setPantryIngredients(mergeIngredientText('', ingredientNames));
+      setPantryProteinInput('');
       if (ingredientNames.length) {
         setPantryScanStatus('detected');
         setPantryStep(1);
@@ -805,6 +1135,37 @@ export default function App() {
     }
   };
 
+  const submitPantryScanFeedback = async (finalIngredients) => {
+    if (pantryScanFeedbackSubmitted || pantryDetectedIngredients.length === 0) return;
+
+    const analytics = getPantryCorrectionAnalytics(
+      pantryDetectedIngredients,
+      finalIngredients,
+      pantryMealType
+    );
+
+    try {
+      const response = await fetchWithRetry(`${API_URL}/api/pantry-scan-feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          detectedIngredients: pantryDetectedIngredients,
+          finalIngredients,
+          mealType: pantryMealType,
+          analyticsContext: getAnalyticsContext()
+        })
+      }, 1);
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      setPantryScanFeedbackSubmitted(true);
+    } catch {
+      void trackEvent('pantry_scan_confirmed', analytics);
+    }
+  };
+
   const findPantryRecipes = async ({ append = false } = {}) => {
     const ingredients = mergeIngredientText(pantryIngredients, splitRawIngredients(pantryProteinInput)).trim();
 
@@ -819,12 +1180,8 @@ export default function App() {
     setIsPantrySearching(true);
     const startedAt = Date.now();
 
-    if (!append && pantryDetectedIngredients.length > 0) {
-      void trackEvent('pantry_scan_confirmed', getPantryCorrectionAnalytics(
-        pantryDetectedIngredients,
-        ingredients,
-        pantryMealType
-      ));
+    if (!append) {
+      await submitPantryScanFeedback(ingredients);
     }
 
     try {
@@ -916,7 +1273,7 @@ export default function App() {
         await fetchWithRetry(`${API_URL}/api/delete-account`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email })
+          body: JSON.stringify({ userId: viewer?.id, email })
         }, 1);
       }
     } catch {
@@ -928,13 +1285,22 @@ export default function App() {
       ONBOARDING_COMPLETE_STORAGE_KEY,
       CALENDAR_STORAGE_KEY,
       SHOPPING_LIST_STORAGE_KEY,
-      SAVED_RECIPES_STORAGE_KEY
+      PRICE_FEEDBACK_PROMPT_STORAGE_KEY,
+      SAVED_RECIPES_STORAGE_KEY,
+      RECIPE_HISTORY_STORAGE_KEY,
+      PREFERRED_STORE_STORAGE_KEY
     ]);
     setViewer(null);
     setHasCompletedOnboarding(false);
     setCalendarMeals([]);
     setLatestShoppingPlan(null);
+    setPendingPriceFeedbackPlan(null);
+    setPriceFeedbackPromptVisible(false);
+    setPriceFeedbackPromptStep('ask');
+    setPreferredStoreName('');
+    setAccountPromptContext(null);
     setSavedRecipes([]);
+    setRecipeHistory([]);
     setPlan(null);
     setSelectedMenuPlan(null);
     setSelectedMealIds([]);
@@ -949,6 +1315,12 @@ export default function App() {
 
   const goBack = () => {
     setError('');
+    if (appMode === 'profile') {
+      setSignupError('');
+      setSignupNotice('');
+      setAppMode('home');
+      return;
+    }
     if (plan) {
       if (planStage === 'recipes') {
         setPlanStage('menu');
@@ -979,12 +1351,6 @@ export default function App() {
       return;
     }
     if (appMode === 'shopping') {
-      setAppMode('home');
-      return;
-    }
-    if (appMode === 'profile') {
-      setSignupError('');
-      setSignupNotice('');
       setAppMode('home');
       return;
     }
@@ -1050,7 +1416,7 @@ export default function App() {
 
     const requestId = pricingRequestId.current + 1;
     pricingRequestId.current = requestId;
-    const pricingSelectedMeals = recipeVarietyMode === 'same'
+    const pricingSelectedMeals = recipeVarietyMode === 'same' && plan?.recipeSource !== 'calendar-repeat'
       ? assignedMeals.map((assignment) => assignment.meal)
       : selectedMeals;
 
@@ -1064,7 +1430,8 @@ export default function App() {
             optionMeals: mealOptions,
             preferences: {
               servingsPerMeal,
-              location: shoppingLocation
+              location: shoppingLocation,
+              storeName: preferredStoreName
             }
           })
         }, 1);
@@ -1105,7 +1472,7 @@ export default function App() {
     };
 
     refreshMenuPricing();
-  }, [assignedMeals, fallbackMenuEstimate, mealOptions, plan, planStage, recipeVarietyMode, selectedMeals, servingsPerMeal, shoppingLocation]);
+  }, [assignedMeals, fallbackMenuEstimate, mealOptions, plan, planStage, preferredStoreName, recipeVarietyMode, selectedMeals, servingsPerMeal, shoppingLocation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1179,6 +1546,7 @@ export default function App() {
           avoidIngredients: selectedAvoids,
           pantryIngredients,
           location: shoppingLocation,
+          storeName: preferredStoreName,
           sourceHandles,
           recipeVarietyMode,
           recipeOptionTarget: getRecipeOptionTarget(days, enabledSlots.length),
@@ -1268,6 +1636,7 @@ export default function App() {
           avoidIngredients: selectedAvoids,
           pantryIngredients,
           location: shoppingLocation,
+          storeName: preferredStoreName,
           sourceHandles,
           recipeVarietyMode,
           recipeOptionTarget: getRecipeOptionTarget(days, enabledSlots.length),
@@ -1320,6 +1689,128 @@ export default function App() {
     } finally {
       setIsFindingMoreMenu(false);
     }
+  };
+
+  const findFreshPlanAgainOptions = async () => {
+    if (!plan || isFindingMoreMenu) return;
+
+    const preferences = plan.preferences || {};
+    const planMealSlots = Array.isArray(preferences.mealSlots) && preferences.mealSlots.length
+      ? preferences.mealSlots
+      : enabledSlots.map(({ type, time }) => ({ type, time }));
+    const planDays = Number(preferences.days || days || 5);
+    const planServings = Number(preferences.servingsPerMeal || servingsPerMeal || 2);
+    const planCalorieTarget = Number(preferences.calorieTarget || calorieTarget || 600);
+    const planBudget = Number(preferences.groceryBudget || budgetTarget || 75);
+    const selectedNames = selectedMeals.map((meal) => meal.name).filter(Boolean);
+    const previousNames = mealOptions.map((meal) => meal.name).filter(Boolean);
+
+    setError('');
+    setIsFindingMoreMenu(true);
+    const startedAt = Date.now();
+    void trackEvent('plan_again_fresh_options_requested', {
+      keptRecipes: selectedMeals.length,
+      previousOptions: mealOptions.length,
+      days: planDays,
+      mealsPerDay: planMealSlots.length
+    });
+
+    try {
+      const response = await fetchWithRetry(`${API_URL}/api/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          days: planDays,
+          weekdaysOnly: Boolean(preferences.weekdaysOnly),
+          proteins: Array.isArray(preferences.proteins) && preferences.proteins.length
+            ? preferences.proteins
+            : selectedProteins,
+          mealSlots: planMealSlots,
+          servingsPerMeal: planServings,
+          allergies: Array.isArray(preferences.allergies) ? preferences.allergies : allergies,
+          dietStyle: preferences.dietStyle || dietStyle,
+          calorieTarget: planCalorieTarget,
+          calorieTargetBasis: 'per_meal_per_serving',
+          dailyCalorieTarget: getDailyCalorieTarget(planCalorieTarget, planMealSlots.length),
+          cookedDailyCalorieTarget: getCookedDailyCalorieTarget(planCalorieTarget, planMealSlots.length, planServings),
+          groceryBudget: planBudget,
+          avoidIngredients: preferences.avoidIngredients || selectedAvoids,
+          pantryIngredients: preferences.pantryIngredients || pantryIngredients,
+          location: preferences.location || shoppingLocation,
+          storeName: preferences.storeName || preferredStoreName,
+          sourceHandles: Array.isArray(preferences.sourceHandles) ? preferences.sourceHandles : sourceHandles,
+          recipeVarietyMode: 'different',
+          recipeOptionTarget: getRecipeOptionTarget(planDays, planMealSlots.length),
+          recipeVariant: `plan-again-${Date.now()}`,
+          forceFresh: true,
+          excludeRecipeNames: [...new Set([...previousNames, ...selectedNames])],
+          analyticsContext: getAnalyticsContext()
+        })
+      }, 5);
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const data = await response.json();
+      const keptRecipes = selectedMeals.map((meal) => ({
+        ...meal,
+        optionKey: meal.optionKey || meal.id || `kept-${normalizeRecipeName(`${meal.mealType}-${meal.name}`)}`
+      }));
+      const freshRecipes = (data.plan?.recipeLibrary || []).map((meal, index) => ({
+        ...meal,
+        optionKey: meal.optionKey || meal.id || `fresh-${Date.now()}-${index}`
+      }));
+      const nextLibrary = uniqueRecipeList([...keptRecipes, ...freshRecipes]);
+
+      setPlan({
+        ...data.plan,
+        recipeSource: 'plan-again-generated',
+        preferences: {
+          ...(data.plan?.preferences || {}),
+          ...preferences,
+          days: planDays,
+          mealSlots: planMealSlots,
+          servingsPerMeal: planServings,
+          groceryBudget: planBudget,
+          recipeVarietyMode: 'different'
+        },
+        recipeLibrary: nextLibrary
+      });
+      setSelectedMealIds(keptRecipes.map((meal) => meal.optionKey));
+      setRecipeVarietyMode('different');
+      setWarnings([
+        keptRecipes.length
+          ? `Kept ${keptRecipes.length} recipe${keptRecipes.length === 1 ? '' : 's'} from last week. Pick the rest from the fresh options.`
+          : 'Fresh options are based on last week\'s preferences. Pick the recipes you want for this week.',
+        ...(data.warnings || [])
+      ]);
+      void trackEvent('plan_again_fresh_options_generated', {
+        keptRecipes: keptRecipes.length,
+        freshOptions: freshRecipes.length,
+        totalOptions: nextLibrary.length,
+        durationMs: Date.now() - startedAt,
+        cacheHit: Boolean(data.cache?.hit)
+      });
+    } catch (requestError) {
+      void trackEvent('plan_again_fresh_options_failed', {
+        keptRecipes: selectedMeals.length,
+        durationMs: Date.now() - startedAt,
+        errorType: getAnalyticsErrorType(requestError)
+      });
+      setError(formatApiFailure('Could not find fresh options from last week\'s preferences', requestError));
+    } finally {
+      setIsFindingMoreMenu(false);
+    }
+  };
+
+  const continueMenuSelection = () => {
+    if (plan?.recipeSource === 'calendar-repeat' && !menuRequirementsMet) {
+      findFreshPlanAgainOptions();
+      return;
+    }
+
+    estimateAssignedMenu();
   };
 
   const toggleLibraryMeal = (meal) => {
@@ -1390,7 +1881,8 @@ export default function App() {
           assignedMeals,
           preferences: {
             servingsPerMeal,
-            location: shoppingLocation
+            location: shoppingLocation,
+            storeName: preferredStoreName
           }
         })
       });
@@ -1400,6 +1892,7 @@ export default function App() {
       }
 
       const data = await response.json();
+      await rememberRecipes(selectedMeals, 'selected');
       setSelectedMenuPlan(data.plan);
       setSelectedDay(0);
       setPlanStage('recipes');
@@ -1494,7 +1987,8 @@ export default function App() {
           assignedMeals: buildAssignmentsFromPlan(updatedPlan),
           preferences: {
             servingsPerMeal,
-            location: shoppingLocation
+            location: shoppingLocation,
+            storeName: preferredStoreName
           }
         })
       });
@@ -1567,10 +2061,24 @@ export default function App() {
         <TopNav
           showBack={Boolean(plan) || appMode !== 'home'}
           onBack={goBack}
-          progress={plan ? 1 : appMode === 'wizard' ? (step + 1) / stepCount : appMode === 'pantry' ? (pantryStep + 1) / 3 : 0.08}
+          progress={appMode === 'profile' ? 0.92 : plan ? 1 : appMode === 'wizard' ? (step + 1) / stepCount : appMode === 'pantry' ? (pantryStep + 1) / 3 : 0.08}
         />
 
-        {plan ? (
+        {appMode === 'profile' ? (
+          <OnboardingScreen
+            slideIndex={ONBOARDING_SLIDES.length}
+            setSlideIndex={setOnboardingIndex}
+            name={signupName}
+            setName={setSignupName}
+            email={signupEmail}
+            setEmail={setSignupEmail}
+            onSubmit={submitSignup}
+            onSkip={completeOnboardingAsGuest}
+            isSubmitting={isSigningUp}
+            error={signupError}
+            notice={signupNotice}
+          />
+        ) : plan ? (
           <>
             {planStage === 'menu' ? (
               <MenuBuilderScreen
@@ -1590,7 +2098,7 @@ export default function App() {
                 budgetRemaining={budgetRemaining}
                 shoppingLocation={shoppingLocation}
                 onFindMoreOptions={findMoreMenuOptions}
-                onContinue={estimateAssignedMenu}
+                onContinue={continueMenuSelection}
                 isEstimating={isEstimating}
                 isFindingMore={isFindingMoreMenu}
                 error={error}
@@ -1616,21 +2124,35 @@ export default function App() {
             ) : null}
           </>
         ) : appMode === 'home' ? (
-          <HomeScreen
-            viewer={viewer}
-            calendarMeals={calendarMeals}
-            latestShoppingPlan={latestShoppingPlan}
-            savedRecipes={savedRecipes}
-            onViewShoppingList={viewShoppingList}
-            onViewCalendarMeal={openCalendarMeal}
-            onClearCalendar={clearSavedCalendar}
-            onViewSavedRecipe={openSavedRecipe}
-            onRemoveSavedRecipe={removeSavedRecipe}
-            onStartGuided={startGuidedPlan}
-            onStartPantry={startPantryFinder}
-            onCreateProfile={startProfileSetup}
-            onDeleteAccount={deleteAccount}
-          />
+          <>
+            <HomeScreen
+              viewer={viewer}
+              calendarMeals={calendarMeals}
+              latestShoppingPlan={latestShoppingPlan}
+              savedRecipes={savedRecipes}
+              recipeHistory={recipeHistory}
+              onViewShoppingList={viewShoppingList}
+              onViewCalendarMeal={openCalendarMeal}
+              onClearCalendar={clearSavedCalendar}
+              onViewSavedRecipe={openSavedRecipe}
+              onViewHistoryRecipe={openHistoryRecipe}
+              onRemoveSavedRecipe={removeSavedRecipe}
+              onStartGuided={startGuidedPlan}
+              onPlanAgain={startPlanAgain}
+              canPlanAgain={reusableCalendarRecipeCount > 0}
+              onStartPantry={startPantryFinder}
+              onCreateProfile={startProfileSetup}
+              onDeleteAccount={deleteAccount}
+            />
+            <PriceFeedbackPrompt
+              visible={priceFeedbackPromptVisible}
+              step={priceFeedbackPromptStep}
+              plan={pendingPriceFeedbackPlan}
+              onAnswer={handlePriceFeedbackPromptAnswer}
+              onSubmitFeedback={submitPromptGroceryEstimateFeedback}
+              onBackToQuestion={() => setPriceFeedbackPromptStep('ask')}
+            />
+          </>
         ) : appMode === 'shopping' ? (
           <ShoppingListScreen
             latestShoppingPlan={latestShoppingPlan}
@@ -1640,9 +2162,7 @@ export default function App() {
         ) : appMode === 'pantry' ? (
           <PantryFinderScreen
             pantryIngredients={pantryIngredients}
-            setPantryIngredients={updatePantryFinderIngredients}
             pantryProteinInput={pantryProteinInput}
-            setPantryProteinInput={updatePantryFinderProtein}
             pantryPhotoUri={pantryPhotoUri}
             pantryDetectedIngredients={pantryDetectedIngredients}
             pantryMealType={pantryMealType}
@@ -1652,6 +2172,8 @@ export default function App() {
             pantryStep={pantryStep}
             visibleRecipeCount={pantryVisibleRecipeCount}
             onFindRecipes={findPantryRecipes}
+            onAddIngredient={addPantryReviewIngredient}
+            onRemoveIngredient={removePantryReviewIngredient}
             onPickPhoto={pickPantryPhoto}
             onTakePhoto={takePantryPhoto}
             onAddRecipeToCalendar={handleAddPantryRecipeToCalendar}
@@ -1660,22 +2182,9 @@ export default function App() {
             onShowMoreRecipes={showMorePantryRecipes}
             isAnalyzingPhoto={isAnalyzingPantryPhoto}
             isLoading={isPantrySearching}
+            learningEnabled={Boolean(viewer?.id)}
             error={pantrySearchError}
             note={pantrySearchNote}
-          />
-        ) : appMode === 'profile' ? (
-          <OnboardingScreen
-            slideIndex={ONBOARDING_SLIDES.length}
-            setSlideIndex={setOnboardingIndex}
-            name={signupName}
-            setName={setSignupName}
-            email={signupEmail}
-            setEmail={setSignupEmail}
-            onSubmit={submitSignup}
-            onSkip={completeOnboardingAsGuest}
-            isSubmitting={isSigningUp}
-            error={signupError}
-            notice={signupNotice}
           />
         ) : appMode === 'calendar-recipe' ? (
           <CalendarRecipeScreen meal={activeCalendarMeal} onSourceOpen={openRecipeSource} />
@@ -1737,7 +2246,12 @@ export default function App() {
               />
             ) : null}
             {step === 8 ? (
-              <LocationStep shoppingLocation={shoppingLocation} setShoppingLocation={setShoppingLocation} />
+              <LocationStep
+                shoppingLocation={shoppingLocation}
+                setShoppingLocation={setShoppingLocation}
+                preferredStoreName={preferredStoreName}
+                setPreferredStoreName={updatePreferredStoreName}
+              />
             ) : null}
             {step === 9 ? (
               <BudgetPreferenceStep
@@ -1765,6 +2279,7 @@ export default function App() {
                 pantryIngredients={pantryIngredients}
                 budgetTarget={budgetTarget}
                 shoppingLocation={shoppingLocation}
+                preferredStoreName={preferredStoreName}
                 sourceHandles={sourceHandles}
                 recipeVarietyMode={recipeVarietyMode}
               />
@@ -1783,6 +2298,12 @@ export default function App() {
           />
         ) : null}
       </View>
+      <AccountGatePrompt
+        visible={Boolean(accountPromptContext)}
+        context={accountPromptContext}
+        onCreateAccount={createAccountFromPrompt}
+        onDismiss={dismissAccountPrompt}
+      />
       <KeyboardDoneAccessory />
     </SafeAreaView>
   );
@@ -1972,6 +2493,10 @@ function getMealOptions(plan, cachedRecipes = [], pantryIngredients = '') {
     ));
   }
 
+  if (plan?.recipeSource === 'calendar-repeat') {
+    return options;
+  }
+
   const allowedTypes = new Set(getTargetSlots(plan).map((slot) => slot.mealType));
   const pantryList = splitIngredientList(pantryIngredients);
   const merged = new Map();
@@ -1999,6 +2524,197 @@ function getMealOptions(plan, cachedRecipes = [], pantryIngredients = '') {
     if (a.cached !== b.cached) return a.cached ? 1 : -1;
     return 0;
   });
+}
+
+function buildPlanAgainPlan({ calendarMeals = [], latestShoppingPlan = null } = {}) {
+  const recipeLibrary = getReusableCalendarRecipes(calendarMeals);
+  if (!recipeLibrary.length) return null;
+
+  const preferences = buildPlanAgainPreferences(latestShoppingPlan, calendarMeals, recipeLibrary);
+  const mealsPerDay = preferences.mealSlots.length;
+  const totalMeals = Number(preferences.days || 0) * mealsPerDay;
+
+  return {
+    id: `plan-again-${Date.now()}`,
+    title: 'Plan Again Menu Options',
+    generatedAt: new Date().toISOString(),
+    generatedBy: 'meal-calendar',
+    recipeSource: 'calendar-repeat',
+    preferences,
+    summary: {
+      days: preferences.days,
+      mealsPerDay,
+      totalMeals,
+      averageCalories: averageRecipeMacro(recipeLibrary, 'calories'),
+      averageProtein: averageRecipeMacro(recipeLibrary, 'protein'),
+      averageCarbs: averageRecipeMacro(recipeLibrary, 'carbs'),
+      averageFat: averageRecipeMacro(recipeLibrary, 'fat')
+    },
+    days: [],
+    recipeLibrary,
+    shoppingList: [],
+    sourceNotes: ['Reused from the recipes already saved in your meal calendar.'],
+    safetyNote:
+      'Recipes, macros, and grocery prices are planning estimates. Confirm ingredients, allergies, and cook proteins to food-safe temperatures.'
+  };
+}
+
+function buildPlanAgainPreferences(latestShoppingPlan = {}, calendarMeals = [], recipeLibrary = []) {
+  const storedPreferences = latestShoppingPlan?.preferences && typeof latestShoppingPlan.preferences === 'object'
+    ? latestShoppingPlan.preferences
+    : {};
+  const mealSlots = normalizePlanAgainMealSlots(storedPreferences.mealSlots, calendarMeals);
+  const days = normalizePlanAgainDays(storedPreferences.days, calendarMeals);
+  const servingsPerMeal = Math.max(1, Number(storedPreferences.servingsPerMeal || 2));
+  const calorieTarget = Number(storedPreferences.calorieTarget || 600);
+  const groceryBudget = Number(
+    storedPreferences.groceryBudget ||
+    latestShoppingPlan?.groceryEstimate?.estimatedTotal ||
+    75
+  );
+
+  return {
+    ...storedPreferences,
+    days,
+    weekdaysOnly: Boolean(storedPreferences.weekdaysOnly),
+    proteins: Array.isArray(storedPreferences.proteins) && storedPreferences.proteins.length
+      ? storedPreferences.proteins
+      : getProteinMixValues(recipeLibrary),
+    mealSlots,
+    servingsPerMeal,
+    allergies: Array.isArray(storedPreferences.allergies) ? storedPreferences.allergies : [],
+    dietStyle: storedPreferences.dietStyle || 'High protein',
+    calorieTarget,
+    calorieTargetBasis: 'per_meal_per_serving',
+    dailyCalorieTarget: getDailyCalorieTarget(calorieTarget, mealSlots.length),
+    cookedDailyCalorieTarget: getCookedDailyCalorieTarget(calorieTarget, mealSlots.length, servingsPerMeal),
+    groceryBudget,
+    avoidIngredients: storedPreferences.avoidIngredients || '',
+    pantryIngredients: storedPreferences.pantryIngredients || '',
+    location: storedPreferences.location || '',
+    sourceHandles: Array.isArray(storedPreferences.sourceHandles) ? storedPreferences.sourceHandles : SOURCE_OPTIONS,
+    recipeVarietyMode: 'different',
+    recipeOptionTarget: Math.max(recipeLibrary.length, getRecipeOptionTarget(days, mealSlots.length))
+  };
+}
+
+function getReusableCalendarRecipes(calendarMeals = []) {
+  const seen = new Set();
+  const recipes = [];
+
+  for (const meal of [...calendarMeals].sort(compareCalendarMeals)) {
+    const storedRecipe = getRecipeFromCalendarMeal(meal);
+    if (!storedRecipe?.name || !hasRecipeDetails(storedRecipe)) continue;
+
+    const key = normalizeRecipeName(`${storedRecipe.mealType}-${storedRecipe.name}`);
+    if (!key || seen.has(key)) continue;
+
+    seen.add(key);
+    recipes.push({
+      ...storedRecipe,
+      id: storedRecipe.id || `plan-again-${key}`,
+      optionKey: `plan-again-${key}`,
+      time: meal.time || storedRecipe.time || defaultMealTime(storedRecipe.mealType)
+    });
+  }
+
+  return recipes;
+}
+
+function compareCalendarMeals(a = {}, b = {}) {
+  const dateCompare = String(a.start || a.date || '').localeCompare(String(b.start || b.date || ''));
+  if (dateCompare !== 0) return dateCompare;
+
+  const dayCompare = Number(a.dayNumber || 0) - Number(b.dayNumber || 0);
+  if (dayCompare !== 0) return dayCompare;
+
+  return sortMealTypes(a.mealType || '', b.mealType || '');
+}
+
+function normalizePlanAgainDays(storedDays, calendarMeals = []) {
+  const numericDays = Number(storedDays || 0);
+  if (Number.isFinite(numericDays) && numericDays > 0) return Math.round(numericDays);
+
+  const dayKeys = new Set();
+  for (const meal of calendarMeals) {
+    const key = meal.dayNumber || String(meal.date || meal.start || '').slice(0, 10);
+    if (key) dayKeys.add(String(key));
+  }
+
+  return dayKeys.size || 5;
+}
+
+function normalizePlanAgainMealSlots(storedMealSlots = [], calendarMeals = []) {
+  if (Array.isArray(storedMealSlots) && storedMealSlots.length) {
+    return storedMealSlots
+      .map((slot) => {
+        const type = slot.type || slot.mealType;
+        if (!type) return null;
+        return {
+          type,
+          time: slot.time || defaultMealTime(type)
+        };
+      })
+      .filter(Boolean);
+  }
+
+  const slotsByType = new Map();
+  for (const meal of [...calendarMeals].sort(compareCalendarMeals)) {
+    const type = meal.mealType || meal.recipe?.mealType;
+    if (!type || slotsByType.has(type)) continue;
+    slotsByType.set(type, {
+      type,
+      time: meal.time || meal.recipe?.time || defaultMealTime(type)
+    });
+  }
+
+  const slots = Array.from(slotsByType.values()).sort((a, b) => sortMealTypes(a.type, b.type));
+  return slots.length ? slots : INITIAL_MEAL_SLOTS.filter((slot) => slot.enabled).map(({ type, time }) => ({ type, time }));
+}
+
+function mergeMealSlotsFromPreferences(mealSlots = []) {
+  const normalizedSlots = normalizePlanAgainMealSlots(mealSlots, []);
+  if (!normalizedSlots.length) return INITIAL_MEAL_SLOTS;
+
+  const slotsByType = new Map(normalizedSlots.map((slot) => [slot.type, slot]));
+  const knownTypes = new Set(INITIAL_MEAL_SLOTS.map((slot) => slot.type));
+  const merged = INITIAL_MEAL_SLOTS.map((slot) => {
+    const selected = slotsByType.get(slot.type);
+    return selected
+      ? { ...slot, time: selected.time || slot.time, enabled: true }
+      : { ...slot, enabled: false };
+  });
+  const customSlots = normalizedSlots
+    .filter((slot) => !knownTypes.has(slot.type))
+    .map((slot) => ({
+      type: slot.type,
+      time: slot.time || defaultMealTime(slot.type),
+      enabled: true
+    }));
+
+  return [...merged, ...customSlots];
+}
+
+function getProteinMixValues(recipes = []) {
+  const proteins = [];
+  const seen = new Set();
+
+  for (const recipe of recipes) {
+    const value = String(recipe?.protein || '').trim();
+    const key = normalizeRecipeName(value);
+    if (!value || !key || seen.has(key)) continue;
+
+    seen.add(key);
+    proteins.push(value);
+  }
+
+  return proteins.length ? proteins : ['Chicken', 'Turkey', 'Salmon'];
+}
+
+function averageRecipeMacro(recipes = [], key) {
+  if (!recipes.length) return 0;
+  const total = recipes.reduce((sum, recipe) => sum + Number(recipe.macros?.[key] || 0), 0);
+  return Math.round(total / recipes.length);
 }
 
 function getSelectedMealOptions(mealOptions, selectedMealIds) {
@@ -2179,8 +2895,42 @@ function getRecipeAnalyticsProperties(recipe = {}) {
     sourceCount: Array.isArray(recipe?.sources) ? recipe.sources.length : 0,
     estimatedCost: toFiniteAnalyticsNumber(recipe?.estimatedCost),
     calories: toFiniteAnalyticsNumber(recipe?.macros?.calories),
-    proteinGrams: toFiniteAnalyticsNumber(recipe?.macros?.protein)
+    proteinGrams: toFiniteAnalyticsNumber(recipe?.macros?.protein),
+    ingredientTags: getRecipePreferenceIngredientTags(recipe),
+    styleTags: getRecipePreferenceStyleTags(recipe)
   };
+}
+
+function getRecipePreferenceIngredientTags(recipe = {}) {
+  const text = [
+    recipe?.name,
+    recipe?.description,
+    ...(Array.isArray(recipe?.ingredients) ? recipe.ingredients : [])
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return RECIPE_PREFERENCE_INGREDIENTS.filter((ingredient) => text.includes(ingredient)).slice(0, 12);
+}
+
+function getRecipePreferenceStyleTags(recipe = {}) {
+  const text = `${recipe?.name || ''} ${recipe?.description || ''}`.toLowerCase();
+  const patterns = [
+    ['air fryer', /\bair[- ]?fry(?:er|ied)?\b/],
+    ['bake', /\b(?:bake|baked|casserole)\b/],
+    ['bowl', /\bbowl\b/],
+    ['curry', /\bcurry\b/],
+    ['kebab', /\b(?:kebab|kabob|skewer)\b/],
+    ['pasta', /\b(?:pasta|penne|spaghetti|linguine|macaroni|orzo|noodle)\b/],
+    ['pizza', /\b(?:pizza|flatbread)\b/],
+    ['salad', /\bsalad\b/],
+    ['sandwich', /\b(?:sandwich|burger|slider)\b/],
+    ['skillet', /\bskillet\b/],
+    ['soup', /\b(?:soup|stew|chowder|chili)\b/],
+    ['taco', /\b(?:taco|tostada|quesadilla|burrito)\b/],
+    ['toast', /\btoast\b/],
+    ['wrap', /\b(?:wrap|lettuce cup)\b/]
+  ];
+
+  return patterns.filter(([, pattern]) => pattern.test(text)).map(([style]) => style).slice(0, 6);
 }
 
 function getAnalyticsScreen({
@@ -2454,6 +3204,16 @@ function uniqueRecipeList(recipes = []) {
   return unique;
 }
 
+function uniqueRecipesByName(recipes = []) {
+  const seen = new Set();
+  return (recipes || []).filter((recipe) => {
+    const key = normalizeRecipeName(recipe?.recipe?.name || recipe?.name);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function getDailyCalorieTarget(calorieTarget, mealCount) {
   const perMeal = Number(calorieTarget || 0);
   const meals = Math.max(1, Number(mealCount || 1));
@@ -2653,6 +3413,157 @@ function sanitizeCalendarRecipe(recipe = {}) {
   };
 }
 
+function buildInitialRecipeHistory(storedHistory = [], savedRecipes = [], calendarMeals = []) {
+  const normalizedStored = (Array.isArray(storedHistory) ? storedHistory : [])
+    .map(normalizeRecipeHistoryEntry)
+    .filter(Boolean)
+    .sort((left, right) => String(right.lastAt).localeCompare(String(left.lastAt)))
+    .slice(0, 120);
+  if (normalizedStored.length) return normalizedStored;
+
+  let history = [];
+  const now = new Date().toISOString();
+  for (const recipe of savedRecipes || []) {
+    history = mergeRecipeHistory(history, [recipe], 'liked', recipe?.savedAt || now);
+  }
+  history = mergeRecipeHistory(
+    history,
+    (calendarMeals || []).map((meal) => meal?.recipe || meal),
+    'planned',
+    now
+  );
+  return history;
+}
+
+function mergeRecipeHistory(currentHistory = [], recipes = [], action, occurredAt = new Date().toISOString()) {
+  if (!['liked', 'planned', 'selected'].includes(action)) {
+    return (currentHistory || []).map(normalizeRecipeHistoryEntry).filter(Boolean);
+  }
+
+  const timestamp = normalizeHistoryTimestamp(occurredAt);
+  const byId = new Map(
+    (currentHistory || [])
+      .map(normalizeRecipeHistoryEntry)
+      .filter(Boolean)
+      .map((entry) => [entry.id, entry])
+  );
+
+  for (const source of recipes || []) {
+    const sourceRecipe = source?.recipe?.name ? source.recipe : source;
+    if (!sourceRecipe?.name) continue;
+    const recipe = sanitizeCalendarRecipe(sourceRecipe);
+    const id = getRecipeHistoryId(recipe);
+    const existing = byId.get(id);
+    const actions = {
+      ...(existing?.actions || {})
+    };
+    const previousAction = actions[action] || {};
+
+    actions[action] = {
+      count: Math.min(999, Math.max(0, Number(previousAction.count || 0)) + 1),
+      lastAt: timestamp
+    };
+
+    byId.set(id, {
+      id,
+      recipe: existing && hasRecipeDetails(existing.recipe) && !hasRecipeDetails(recipe)
+        ? existing.recipe
+        : recipe,
+      actions,
+      firstAt: existing?.firstAt || timestamp,
+      lastAt: !existing?.lastAt || timestamp > existing.lastAt ? timestamp : existing.lastAt,
+      lastAction: action
+    });
+  }
+
+  return [...byId.values()]
+    .sort((left, right) => String(right.lastAt).localeCompare(String(left.lastAt)))
+    .slice(0, 120);
+}
+
+function normalizeRecipeHistoryEntry(entry) {
+  if (!entry?.recipe?.name && !entry?.name) return null;
+  const recipe = sanitizeCalendarRecipe(entry.recipe || entry);
+  const actions = {};
+
+  for (const action of ['liked', 'planned', 'selected']) {
+    const count = Math.max(0, Number(entry?.actions?.[action]?.count || 0));
+    if (!count) continue;
+    actions[action] = {
+      count: Math.min(999, count),
+      lastAt: normalizeHistoryTimestamp(entry.actions[action].lastAt || entry.lastAt)
+    };
+  }
+
+  if (!Object.keys(actions).length) return null;
+  const actionDates = Object.values(actions).map((value) => value.lastAt).filter(Boolean);
+  const sortedActionDates = actionDates.sort();
+  const actionKeys = getRecipeHistoryActionKeys({ actions });
+  const lastAt = normalizeHistoryTimestamp(
+    entry.lastAt || sortedActionDates[sortedActionDates.length - 1]
+  );
+
+  return {
+    id: getRecipeHistoryId(recipe),
+    recipe,
+    actions,
+    firstAt: normalizeHistoryTimestamp(entry.firstAt || lastAt),
+    lastAt,
+    lastAction: ['liked', 'planned', 'selected'].includes(entry.lastAction)
+      ? entry.lastAction
+      : actionKeys[actionKeys.length - 1] || 'selected'
+  };
+}
+
+function getRecipeHistoryId(recipe = {}) {
+  return `history-${normalizeRecipeName(`${recipe.mealType || 'Meal'}-${recipe.name || ''}`)}`
+    .replace(/\s+/g, '-');
+}
+
+function getRecipeHistoryActionKeys(entry = {}) {
+  return ['liked', 'planned', 'selected']
+    .filter((action) => Number(entry?.actions?.[action]?.count || 0) > 0);
+}
+
+function formatRecipeHistoryAction(action, count = 0) {
+  const total = Math.max(1, Number(count || 1));
+  if (action === 'liked') return 'Liked';
+  if (action === 'planned') return total > 1 ? `Used ${total} times` : 'Used in a plan';
+  return total > 1 ? `Selected ${total}x` : 'Selected';
+}
+
+function formatRecipeHistoryDate(value) {
+  const date = new Date(value || 0);
+  if (Number.isNaN(date.getTime())) return '';
+  const today = new Date();
+  const todayKey = getLocalDateKey(today);
+  const dateKey = getLocalDateKey(date);
+  if (dateKey === todayKey) return 'Today';
+
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (dateKey === getLocalDateKey(yesterday)) return 'Yesterday';
+
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric'
+  });
+}
+
+function getLocalDateKey(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0')
+  ].join('-');
+}
+
+function normalizeHistoryTimestamp(value) {
+  const date = new Date(value || Date.now());
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
 function getRecipeFromCalendarMeal(meal = {}) {
   if (meal?.recipe?.name) return sanitizeCalendarRecipe(meal.recipe);
   if (!meal?.name) return null;
@@ -2740,6 +3651,28 @@ function hasShoppingPlan(plan) {
   const lineItems = plan?.groceryEstimate?.lineItems;
   const shoppingList = plan?.shoppingList;
   return (Array.isArray(lineItems) && lineItems.length > 0) || (Array.isArray(shoppingList) && shoppingList.length > 0);
+}
+
+function isSameFeedbackPlan(left = {}, right = {}) {
+  if (!left || !right) return false;
+  if (left.id && right.id) return left.id === right.id;
+  if (left.savedAt && right.savedAt) return left.savedAt === right.savedAt;
+  return false;
+}
+
+function buildGroceryFeedbackId(plan = {}, analyticsId = '') {
+  const planKey = String(
+    plan?.id
+    || plan?.generatedAt
+    || plan?.savedAt
+    || `${plan?.summary?.totalMeals || 0}-${plan?.groceryEstimate?.estimatedTotal || 0}`
+  ).trim();
+  const identityKey = String(analyticsId || 'anonymous').trim();
+  return `grocery-${identityKey}-${planKey}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 200);
 }
 
 function addPlanToCalendar(plan) {
@@ -2939,16 +3872,16 @@ function OnboardingScreen({
       >
       {compactSignup ? (
         <View style={styles.onboardingHeroCompact}>
-          <Text style={styles.signupCompactTitle}>Create your profile.</Text>
-          <Text style={styles.signupCompactSubtitle}>Email is optional. You can keep using recipes without an account.</Text>
+          <Text style={styles.signupCompactTitle}>Keep your plans.</Text>
+          <Text style={styles.signupCompactSubtitle}>Create an account to save calendars and teach CutPlate what you enjoy.</Text>
         </View>
       ) : (
         <View style={styles.onboardingHero}>
           <CardinalMascot active compact />
-          <Text style={styles.homeTitle}>{isSignup ? 'Create your profile.' : slide.title}</Text>
+          <Text style={styles.homeTitle}>{isSignup ? 'Make CutPlate yours.' : slide.title}</Text>
           <Text style={styles.homeSubtitle}>
             {isSignup
-              ? 'Optional: add your name and email to save preferences and favorite recipes. You can use recipes without an account.'
+              ? 'A free account saves recipes and meal calendars, and learns the kinds of meals you choose. You can still browse and generate recipes as a guest.'
               : slide.body}
           </Text>
         </View>
@@ -3006,12 +3939,12 @@ function OnboardingScreen({
           </Field>
           {notice ? <Text style={styles.successText}>{notice}</Text> : null}
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
-          <Pressable onPress={onSkip} style={styles.homePlanButton}>
-            <Text style={styles.homePlanButtonText}>Continue as guest</Text>
-          </Pressable>
           <Pressable onPress={onSubmit} disabled={isSubmitting} style={[styles.profileSubmitButton, isSubmitting && styles.continueDisabled]}>
             {isSubmitting ? <ActivityIndicator color={COLORS.white} /> : null}
-            <Text style={styles.profileSubmitButtonText}>{isSubmitting ? 'Sending' : 'Create profile'}</Text>
+            <Text style={styles.profileSubmitButtonText}>{isSubmitting ? 'Creating account' : 'Create free account'}</Text>
+          </Pressable>
+          <Pressable onPress={onSkip} style={styles.guestButton}>
+            <Text style={styles.guestButtonText}>Continue as guest</Text>
           </Pressable>
         </View>
       )}
@@ -3025,12 +3958,16 @@ function HomeScreen({
   calendarMeals,
   latestShoppingPlan,
   savedRecipes,
+  recipeHistory,
   onViewShoppingList,
   onViewCalendarMeal,
   onClearCalendar,
   onViewSavedRecipe,
+  onViewHistoryRecipe,
   onRemoveSavedRecipe,
   onStartGuided,
+  onPlanAgain,
+  canPlanAgain,
   onStartPantry,
   onCreateProfile,
   onDeleteAccount
@@ -3063,6 +4000,18 @@ function HomeScreen({
           </View>
         </Pressable>
 
+        {canPlanAgain ? (
+          <Pressable onPress={onPlanAgain} style={styles.homeActionRepeat}>
+            <View style={styles.homeActionIcon}>
+              <RefreshCw color={COLORS.cardinal} size={24} strokeWidth={2.6} />
+            </View>
+            <View style={styles.homeActionText}>
+              <Text style={styles.homeActionTitle}>Plan Again this week</Text>
+              <Text style={styles.homeActionSub}>Reuse last week's setup and pick which recipes come back.</Text>
+            </View>
+          </Pressable>
+        ) : null}
+
         <Pressable onPress={onStartPantry} style={styles.homeActionSecondary}>
           <View style={styles.homeActionIcon}>
             <UtensilsIcon />
@@ -3082,11 +4031,20 @@ function HomeScreen({
         onClearCalendar={onClearCalendar}
       />
 
-      <SavedRecipeShelf
-        recipes={savedRecipes}
-        onViewRecipe={onViewSavedRecipe}
-        onRemoveRecipe={onRemoveSavedRecipe}
-      />
+      {viewer ? (
+        <RecipeHistorySection
+          entries={recipeHistory}
+          onViewRecipe={onViewHistoryRecipe}
+        />
+      ) : null}
+
+      {viewer ? (
+        <SavedRecipeShelf
+          recipes={savedRecipes}
+          onViewRecipe={onViewSavedRecipe}
+          onRemoveRecipe={onRemoveSavedRecipe}
+        />
+      ) : null}
 
       {viewer ? (
         <Pressable
@@ -3099,11 +4057,114 @@ function HomeScreen({
         </Pressable>
       ) : (
         <Pressable onPress={onCreateProfile} style={styles.profilePrompt}>
-          <Text style={styles.profilePromptTitle}>Create optional profile</Text>
-          <Text style={styles.profilePromptText}>Save your name, email, favorite recipes, and meal preferences when you are ready.</Text>
+          <Text style={styles.profilePromptTitle}>Keep your next great meal</Text>
+          <Text style={styles.profilePromptText}>Create a free account to save recipes and calendars, and get fresher suggestions shaped by your picks.</Text>
         </Pressable>
       )}
     </ScrollView>
+  );
+}
+
+function RecipeHistorySection({ entries = [], onViewRecipe }) {
+  const [filter, setFilter] = useState('all');
+  const filters = [
+    { key: 'all', label: 'All' },
+    { key: 'liked', label: 'Liked' },
+    { key: 'planned', label: 'Used' },
+    { key: 'selected', label: 'Selected' }
+  ];
+  const visibleEntries = entries
+    .filter((entry) => filter === 'all' || Number(entry?.actions?.[filter]?.count || 0) > 0)
+    .slice(0, 8);
+
+  return (
+    <View style={styles.recipeHistorySection}>
+      <View style={styles.recipeHistoryHeader}>
+        <View style={styles.recipeHistoryTitleRow}>
+          <History color={COLORS.cardinal} size={20} strokeWidth={2.8} />
+          <Text style={styles.cachedHomeTitle}>Recipe history</Text>
+        </View>
+        <Text style={styles.recipeHistoryTotal}>{entries.length}</Text>
+      </View>
+
+      <View style={styles.recipeHistoryTabs}>
+        {filters.map((option) => (
+          <Pressable
+            key={option.key}
+            onPress={() => setFilter(option.key)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: filter === option.key }}
+            style={[
+              styles.recipeHistoryTab,
+              filter === option.key && styles.recipeHistoryTabSelected
+            ]}
+          >
+            <Text
+              style={[
+                styles.recipeHistoryTabText,
+                filter === option.key && styles.recipeHistoryTabTextSelected
+              ]}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {visibleEntries.length ? (
+        <View style={styles.recipeHistoryList}>
+          {visibleEntries.map((entry) => {
+            const recipe = entry.recipe || {};
+            const actions = getRecipeHistoryActionKeys(entry);
+
+            return (
+              <Pressable
+                key={entry.id}
+                onPress={() => onViewRecipe?.(entry)}
+                accessibilityRole="button"
+                accessibilityLabel={`Open recipe history for ${recipe.name}`}
+                style={styles.recipeHistoryItem}
+              >
+                <View style={styles.recipeHistoryItemTop}>
+                  <View style={styles.recipeHistoryItemText}>
+                    <Text style={styles.recipeHistoryName}>{recipe.name}</Text>
+                    <Text style={styles.recipeHistoryMeta}>
+                      {recipe.mealType || 'Meal'} - {recipe.macros?.calories || 0} cals, {recipe.macros?.protein || 0}g protein
+                    </Text>
+                  </View>
+                  <Text style={styles.recipeHistoryWhen}>{formatRecipeHistoryDate(entry.lastAt)}</Text>
+                </View>
+                <View style={styles.recipeHistoryBadges}>
+                  {actions.map((action) => (
+                    <View
+                      key={action}
+                      style={[
+                        styles.recipeHistoryBadge,
+                        action === 'liked' && styles.recipeHistoryBadgeLiked,
+                        action === 'planned' && styles.recipeHistoryBadgePlanned
+                      ]}
+                    >
+                      {action === 'liked' ? <Heart color={COLORS.cardinal} size={13} strokeWidth={2.8} /> : null}
+                      {action === 'planned' ? <CalendarPlus color={COLORS.greenDark} size={13} strokeWidth={2.8} /> : null}
+                      {action === 'selected' ? <Check color="#795500" size={13} strokeWidth={3} /> : null}
+                      <Text style={styles.recipeHistoryBadgeText}>
+                        {formatRecipeHistoryAction(action, entry.actions?.[action]?.count)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : (
+        <Text style={styles.cachedEmpty}>
+          {filter === 'all'
+            ? 'Recipes you save, select, or use in a plan will collect here.'
+            : `No ${filters.find((option) => option.key === filter)?.label.toLowerCase()} recipes yet.`}
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -3376,32 +4437,123 @@ function PantryScanIntro({
   );
 }
 
-function DetectedIngredients({ ingredients = [] }) {
+function PantryIngredientReview({
+  ingredients = '',
+  detectedIngredients = [],
+  onAddIngredient,
+  onRemoveIngredient
+}) {
+  const [newIngredient, setNewIngredient] = useState('');
+  const reviewItems = splitRawIngredients(ingredients);
+
+  const addIngredient = () => {
+    const value = newIngredient.trim();
+    if (!value) return;
+    onAddIngredient?.(value);
+    setNewIngredient('');
+  };
+
   return (
-    <View style={styles.detectedIngredientPanel}>
-      <Text style={styles.cachedHomeTitle}>Detected ingredients</Text>
-      <View style={styles.detectedIngredientList}>
-        {ingredients.map((ingredient) => (
-          <Text
-            key={`${ingredient.name}-${ingredient.category}`}
-            style={[
-              styles.detectedIngredientPill,
-              ingredient.confidence === 'low' && styles.detectedIngredientPillLow
-            ]}
-          >
-            {ingredient.name}
+    <View style={styles.pantryReviewSection}>
+      <View style={styles.pantryReviewHeader}>
+        <View style={styles.pantryReviewHeading}>
+          <Text style={styles.confirmPanelTitle}>Check each item</Text>
+          <Text style={styles.cachedEmpty}>
+            {reviewItems.length} {reviewItems.length === 1 ? 'item' : 'items'} ready
           </Text>
-        ))}
+        </View>
+        <View style={styles.pantryReviewCount}>
+          <Check color={COLORS.greenDark} size={18} strokeWidth={3} />
+          <Text style={styles.pantryReviewCountText}>{reviewItems.length}</Text>
+        </View>
+      </View>
+
+      <View style={styles.pantryReviewList}>
+        {reviewItems.map((ingredient) => {
+          const detected = detectedIngredients.find((item) => (
+            ingredientsOverlap(item?.name, ingredient)
+          ));
+          const detail = detected
+            ? `${formatPantryCategory(detected.category)}${detected.confidence === 'low' ? ' - check this one' : ''}`
+            : 'Added by you';
+
+          return (
+            <View key={normalizeRecipeName(ingredient)} style={styles.pantryReviewItem}>
+              <View style={styles.pantryReviewCheck}>
+                <Check color={COLORS.white} size={16} strokeWidth={3.2} />
+              </View>
+              <View style={styles.pantryReviewItemText}>
+                <Text style={styles.pantryReviewItemName}>{ingredient}</Text>
+                <Text style={styles.pantryReviewItemMeta}>{detail}</Text>
+              </View>
+              <Pressable
+                onPress={() => onRemoveIngredient?.(ingredient)}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${ingredient}`}
+                style={styles.pantryReviewRemove}
+              >
+                <Trash2 color={COLORS.cardinal} size={18} strokeWidth={2.8} />
+              </Pressable>
+            </View>
+          );
+        })}
+        {!reviewItems.length ? (
+          <Text style={styles.pantryReviewEmpty}>Remove any mistakes, then add what is actually there.</Text>
+        ) : null}
+      </View>
+
+      <View style={styles.pantryAddRow}>
+        <TextInput
+          value={newIngredient}
+          onChangeText={setNewIngredient}
+          placeholder="Add a missed item"
+          placeholderTextColor="#777777"
+          style={styles.pantryAddInput}
+          returnKeyType="done"
+          onSubmitEditing={addIngredient}
+          {...TEXT_INPUT_DONE_PROPS}
+        />
+        <Pressable
+          onPress={addIngredient}
+          disabled={!newIngredient.trim()}
+          accessibilityRole="button"
+          accessibilityLabel="Add pantry item"
+          style={[styles.pantryAddButton, !newIngredient.trim() && styles.continueDisabled]}
+        >
+          <Plus color={COLORS.white} size={20} strokeWidth={3} />
+          <Text style={styles.pantryAddButtonText}>Add</Text>
+        </Pressable>
       </View>
     </View>
   );
 }
 
+function PantryPhotoReview({ uri }) {
+  if (!uri) return null;
+
+  return (
+    <View style={styles.pantryPhotoPanel}>
+      <Image source={{ uri }} style={styles.pantryPhotoPreview} />
+      <View style={styles.pantryPhotoText}>
+        <Text style={styles.cachedHomeTitle}>Photo scanned</Text>
+        <Text style={styles.cachedEmpty}>Remove anything that is not there and add anything the photo missed.</Text>
+      </View>
+    </View>
+  );
+}
+
+function formatPantryCategory(value = '') {
+  const label = String(value || 'ingredient').trim().replace(/[_-]+/g, ' ');
+  return label
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
 function PantryFinderScreen({
   pantryIngredients,
-  setPantryIngredients,
   pantryProteinInput,
-  setPantryProteinInput,
   pantryPhotoUri,
   pantryDetectedIngredients,
   pantryMealType,
@@ -3411,6 +4563,8 @@ function PantryFinderScreen({
   pantryStep,
   visibleRecipeCount,
   onFindRecipes,
+  onAddIngredient,
+  onRemoveIngredient,
   onPickPhoto,
   onTakePhoto,
   onAddRecipeToCalendar,
@@ -3419,6 +4573,7 @@ function PantryFinderScreen({
   onShowMoreRecipes,
   isAnalyzingPhoto,
   isLoading,
+  learningEnabled,
   error,
   note
 }) {
@@ -3427,7 +4582,7 @@ function PantryFinderScreen({
   const stepTitle = pantryStep === 0
     ? 'Scan your pantry.'
     : pantryStep === 1
-      ? 'Anything missing?'
+      ? 'Check what I found.'
       : 'Pick a recipe.';
 
   return (
@@ -3444,7 +4599,7 @@ function PantryFinderScreen({
           {pantryStep === 0
             ? 'Take a cabinet or fridge photo. If it is not food, I will ask you to try again.'
             : pantryStep === 1
-              ? 'Review what I found, add proteins or anything the photo missed, then choose a meal type.'
+              ? 'Remove scan mistakes, add anything missing, then choose the kind of meal you want.'
               : 'Start with three options. If they are not right, pull up more from the same search.'}
         </Text>
       </View>
@@ -3464,15 +4619,16 @@ function PantryFinderScreen({
       {pantryStep === 1 ? (
         <PantryConfirmStep
           pantryIngredients={pantryIngredients}
-          setPantryIngredients={setPantryIngredients}
-          pantryProteinInput={pantryProteinInput}
-          setPantryProteinInput={setPantryProteinInput}
+          pantryPhotoUri={pantryPhotoUri}
           pantryDetectedIngredients={pantryDetectedIngredients}
           pantryMealType={pantryMealType}
           setPantryMealType={setPantryMealType}
           hasIngredients={hasIngredients}
           isAnalyzingPhoto={isAnalyzingPhoto}
           isLoading={isLoading}
+          learningEnabled={learningEnabled}
+          onAddIngredient={onAddIngredient}
+          onRemoveIngredient={onRemoveIngredient}
           onFindRecipes={onFindRecipes}
         />
       ) : null}
@@ -3498,54 +4654,36 @@ function PantryFinderScreen({
 
 function PantryConfirmStep({
   pantryIngredients,
-  setPantryIngredients,
-  pantryProteinInput,
-  setPantryProteinInput,
+  pantryPhotoUri,
   pantryDetectedIngredients,
   pantryMealType,
   setPantryMealType,
   hasIngredients,
   isAnalyzingPhoto,
   isLoading,
+  learningEnabled,
+  onAddIngredient,
+  onRemoveIngredient,
   onFindRecipes
 }) {
   return (
     <>
-      {pantryDetectedIngredients.length ? <DetectedIngredients ingredients={pantryDetectedIngredients} /> : null}
+      <PantryPhotoReview uri={pantryPhotoUri} />
+      <PantryIngredientReview
+        ingredients={pantryIngredients}
+        detectedIngredients={pantryDetectedIngredients}
+        onAddIngredient={onAddIngredient}
+        onRemoveIngredient={onRemoveIngredient}
+      />
 
-      <View style={styles.pantryConfirmPanel}>
-        <Text style={styles.confirmPanelTitle}>Add anything the scan missed.</Text>
-        <Text style={styles.cachedEmpty}>Proteins matter here: chicken, steak, tofu, eggs, fish, or whatever else you want included.</Text>
+      {learningEnabled ? (
+        <View style={styles.pantryLearningNote}>
+          <Sparkles color={COLORS.cardinal} size={18} strokeWidth={2.6} />
+          <Text style={styles.pantryLearningNoteText}>Your corrections will tune future pantry scans.</Text>
+        </View>
+      ) : null}
 
-        <Field label="Detected or typed ingredients">
-          <TextInput
-            value={pantryIngredients}
-            onChangeText={setPantryIngredients}
-            placeholder="Example: rice, broccoli, salsa"
-            placeholderTextColor="#999999"
-            style={styles.cleanInput}
-            returnKeyType="done"
-            blurOnSubmit
-            onSubmitEditing={dismissKeyboard}
-            {...TEXT_INPUT_DONE_PROPS}
-          />
-        </Field>
-
-        <Field label="Other proteins or ingredients">
-          <TextInput
-            value={pantryProteinInput}
-            onChangeText={setPantryProteinInput}
-            placeholder="Example: chicken breast, steak, tofu, eggs"
-            placeholderTextColor="#999999"
-            style={styles.cleanInput}
-            returnKeyType="done"
-            blurOnSubmit
-            onSubmitEditing={dismissKeyboard}
-            {...TEXT_INPUT_DONE_PROPS}
-          />
-        </Field>
-      </View>
-
+      <Text style={styles.pantryMealTypeTitle}>What are you making?</Text>
       <View style={styles.pantryTypeRow}>
         {['Breakfast', 'Lunch', 'Dinner', 'Snack'].map((mealType) => (
           <PillOption
@@ -3564,7 +4702,7 @@ function PantryConfirmStep({
       >
         {isLoading ? <ActivityIndicator color={COLORS.white} /> : null}
         <Text style={styles.homePlanButtonText}>
-          {isLoading ? 'Finding recipes' : isAnalyzingPhoto ? 'Reading photo' : 'Find recipes'}
+          {isLoading ? 'Finding recipes' : isAnalyzingPhoto ? 'Reading photo' : 'Confirm and find recipes'}
         </Text>
       </Pressable>
     </>
@@ -3930,7 +5068,12 @@ function GoalStep({
   );
 }
 
-function LocationStep({ shoppingLocation, setShoppingLocation }) {
+function LocationStep({
+  shoppingLocation,
+  setShoppingLocation,
+  preferredStoreName,
+  setPreferredStoreName
+}) {
   return (
     <View style={styles.stack}>
       <View style={styles.sourceIntro}>
@@ -3951,6 +5094,20 @@ function LocationStep({ shoppingLocation, setShoppingLocation }) {
         onSubmitEditing={dismissKeyboard}
         {...TEXT_INPUT_DONE_PROPS}
       />
+      <Field label="Preferred grocery store (optional)">
+        <TextInput
+          value={preferredStoreName}
+          onChangeText={setPreferredStoreName}
+          placeholder="Aldi, Price Chopper, Loblaws"
+          placeholderTextColor="#999999"
+          style={styles.cleanInput}
+          autoCapitalize="words"
+          returnKeyType="done"
+          blurOnSubmit
+          onSubmitEditing={dismissKeyboard}
+          {...TEXT_INPUT_DONE_PROPS}
+        />
+      </Field>
       <View style={styles.estimateHint}>
         <DollarSign color={COLORS.greenDark} size={20} strokeWidth={2.6} />
         <Text style={styles.estimateHintText}>The estimate is built from selected meals, servings, ingredients, and regional pricing.</Text>
@@ -4038,6 +5195,7 @@ function ReviewStep({
   pantryIngredients,
   budgetTarget,
   shoppingLocation,
+  preferredStoreName,
   sourceHandles,
   recipeVarietyMode
 }) {
@@ -4061,6 +5219,7 @@ function ReviewStep({
       <SummaryLine label="Pantry/fridge" value={pantryIngredients.trim() || 'Nothing entered'} />
       <SummaryLine label="Budget" value={formatCurrencyAmount(Number(budgetTarget || 0), currencySymbol)} />
       <SummaryLine label="Location" value={shoppingLocation || 'National average'} />
+      <SummaryLine label="Preferred store" value={preferredStoreName.trim() || 'No store selected'} />
       <SummaryLine
         label="Social recipes"
         value={sourceHandles.length ? 'Yes, include social media inspiration' : 'No, keep it general'}
@@ -4147,10 +5306,21 @@ function MenuBuilderScreen({
 }) {
   const mealTypes = Object.keys(mealTypeRequirements).sort(sortMealTypes);
   const allRequirementsMet = areMealRequirementsMet(mealTypeRequirements, selectedCounts, recipeVarietyMode);
+  const planAgainPicker = plan?.recipeSource === 'calendar-repeat';
   const isOverBudget = budgetAmount > 0 && budgetRemaining < 0;
   const marginalCosts = menuPricing?.marginalCosts || {};
   const currencySymbol = getCurrencySymbolFromEstimateOrLocation(menuPricing?.selectedEstimate, shoppingLocation);
-  const repeatMode = recipeVarietyMode === 'same';
+  const repeatMode = recipeVarietyMode === 'same' && !planAgainPicker;
+  const canContinue = planAgainPicker ? !isEstimating && !isFindingMore : allRequirementsMet && !isEstimating;
+  const continueLabel = planAgainPicker
+    ? allRequirementsMet
+      ? 'Fit into days'
+      : selectedMealCount > 0
+        ? 'Keep picks + find new'
+        : 'Find new options'
+    : isEstimating
+      ? 'Fitting menu'
+      : 'Fit into days';
   const budgetLabel = budgetAmount > 0
     ? `${formatCurrencyAmount(Math.abs(budgetRemaining || 0), currencySymbol)} ${isOverBudget ? 'over' : 'left'}`
     : 'Set a budget';
@@ -4168,7 +5338,9 @@ function MenuBuilderScreen({
             <CardinalMascot active={isEstimating} compact />
             <View style={styles.guideBubble}>
               <Text style={styles.guideText}>
-                {repeatMode
+                {planAgainPicker
+                  ? 'Pick any recipes you want to keep from last week. If you leave open spots, I will find fresh options from the same setup.'
+                  : repeatMode
                   ? 'Pick one or more saved recipes per meal type. I will repeat them across the days and scale the shopping list.'
                   : 'These options were shaped around your budget. Pick what sounds good, then I will fit it into days.'}
               </Text>
@@ -4176,7 +5348,9 @@ function MenuBuilderScreen({
           </View>
           <Text style={styles.resultTitle}>Build your menu.</Text>
           <Text style={styles.resultSubtitle}>
-            {repeatMode
+            {planAgainPicker
+              ? `${selectedMealCount} kept from last week. ${targetSlots.length - selectedMealCount} open spot${targetSlots.length - selectedMealCount === 1 ? '' : 's'} for fresh options.`
+              : repeatMode
               ? `${selectedMealCount} repeat recipe${selectedMealCount === 1 ? '' : 's'} selected from ${mealOptions.length} saved options.`
               : `${selectedMealCount} of ${targetSlots.length} recipes selected from ${mealOptions.length} options.`}
           </Text>
@@ -4210,7 +5384,7 @@ function MenuBuilderScreen({
                 <View style={styles.categoryHeader}>
                   <Text style={styles.menuDayTitle}>{mealType}</Text>
                   <Text style={styles.categoryCount}>
-                    {repeatMode ? `${selectedForType}/${required} repeatable` : `${selectedForType}/${required} max`}
+                    {planAgainPicker ? `${selectedForType}/${required} kept` : repeatMode ? `${selectedForType}/${required} repeatable` : `${selectedForType}/${required} max`}
                   </Text>
                 </View>
                 <View style={styles.optionStack}>
@@ -4235,6 +5409,14 @@ function MenuBuilderScreen({
                         </View>
                         <View style={styles.menuMealBody}>
                           <Text style={styles.menuMealName}>{meal.name}</Text>
+                          {meal.recommendationReason ? (
+                            <View style={styles.preferenceReasonRow}>
+                              <Sparkles color={COLORS.cardinal} size={13} strokeWidth={2.8} />
+                              <Text style={styles.preferenceReasonText} numberOfLines={2}>
+                                {meal.recommendationReason}
+                              </Text>
+                            </View>
+                          ) : null}
                           <Text style={styles.menuMealDesc} numberOfLines={2}>
                             {meal.description}
                           </Text>
@@ -4254,7 +5436,7 @@ function MenuBuilderScreen({
           })}
         </View>
 
-        {!repeatMode ? (
+        {!repeatMode && !planAgainPicker ? (
           <Pressable
             onPress={onFindMoreOptions}
             disabled={isFindingMore}
@@ -4270,11 +5452,13 @@ function MenuBuilderScreen({
       <View style={styles.bottomBar}>
         <Pressable
           onPress={onContinue}
-          disabled={!allRequirementsMet || isEstimating}
-          style={[styles.continueButton, (!allRequirementsMet || isEstimating) && styles.continueDisabled]}
+          disabled={!canContinue}
+          style={[styles.continueButton, !canContinue && styles.continueDisabled]}
         >
-          {isEstimating ? <ActivityIndicator color={COLORS.white} /> : null}
-          <Text style={styles.continueText}>{isEstimating ? 'Fitting menu' : 'Fit into days'}</Text>
+          {isEstimating || (planAgainPicker && isFindingMore) ? <ActivityIndicator color={COLORS.white} /> : null}
+          <Text style={styles.continueText}>
+            {planAgainPicker && isFindingMore ? 'Finding options' : continueLabel}
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -4403,10 +5587,6 @@ function ShoppingListModule({ plan, onEstimateFeedback }) {
   const currencySymbol = getCurrencySymbolFromEstimateOrLocation(groceryEstimate, plan?.preferences?.location);
   const shoppingList = Array.isArray(plan?.shoppingList) ? plan.shoppingList : [];
   const lineItems = Array.isArray(groceryEstimate?.lineItems) ? groceryEstimate.lineItems : [];
-  const [feedbackRating, setFeedbackRating] = useState('');
-  const [actualTotal, setActualTotal] = useState('');
-  const [storeName, setStoreName] = useState('');
-  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
   if (!lineItems.length && !shoppingList.length) return null;
 
@@ -4449,84 +5629,243 @@ function ShoppingListModule({ plan, onEstimateFeedback }) {
       )}
       {groceryEstimate?.note ? <Text style={styles.estimateNote}>{groceryEstimate.note}</Text> : null}
       {groceryEstimate && onEstimateFeedback ? (
-        <View style={styles.groceryFeedback}>
-          <Text style={styles.groceryFeedbackTitle}>Was this estimate close?</Text>
-          <Text style={styles.groceryFeedbackHint}>
-            This helps CutPlate learn how grocery costs differ by market and store.
-          </Text>
-          <View style={styles.groceryFeedbackChoices}>
-            {[
-              { value: 'too_low', label: 'Too low' },
-              { value: 'close', label: 'Close' },
-              { value: 'too_high', label: 'Too high' }
-            ].map((option) => (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  setFeedbackRating(option.value);
-                  setFeedbackSubmitted(false);
-                }}
-                style={[
-                  styles.groceryFeedbackChoice,
-                  feedbackRating === option.value && styles.groceryFeedbackChoiceSelected
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.groceryFeedbackChoiceText,
-                    feedbackRating === option.value && styles.groceryFeedbackChoiceTextSelected
-                  ]}
-                >
-                  {option.label}
-                </Text>
-              </Pressable>
-            ))}
+        <GroceryFeedbackForm plan={plan} onEstimateFeedback={onEstimateFeedback} />
+      ) : null}
+    </View>
+  );
+}
+
+function AccountGatePrompt({ visible, context, onCreateAccount, onDismiss }) {
+  const content = {
+    plan_ready: {
+      eyebrow: 'Your plan is ready',
+      title: 'Keep this one?',
+      body: 'Create a free account to save this plan to your meal calendar. Your future recipe options will also learn from what you pick.'
+    },
+    save_calendar: {
+      eyebrow: 'Save your week',
+      title: 'Create an account for your calendar.',
+      body: 'Guest plans stay temporary. A free account keeps this calendar and shopping list, and helps CutPlate suggest similar new recipes next time.'
+    },
+    save_recipe: {
+      eyebrow: 'Remember this recipe',
+      title: 'Create an account to save it.',
+      body: 'Saved recipes become strong taste signals, so CutPlate can find meals with a similar feel without serving the same recipe every week.'
+    }
+  }[context] || {
+    eyebrow: 'Keep your plans',
+    title: 'Create a free account.',
+    body: 'Save recipes and calendars, and let future suggestions improve as you use CutPlate.'
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onDismiss}
+    >
+      <View style={styles.accountGateOverlay}>
+        <View style={styles.accountGateCard}>
+          <View style={styles.accountGateIcon}>
+            <UserPlus color={COLORS.cardinal} size={24} strokeWidth={2.6} />
           </View>
-          <TextInput
-            value={actualTotal}
-            onChangeText={setActualTotal}
-            placeholder={`Actual checkout total (optional, ${currencySymbol})`}
-            placeholderTextColor="#999999"
-            keyboardType="decimal-pad"
-            style={styles.groceryFeedbackInput}
-            returnKeyType="done"
-            blurOnSubmit
-            onSubmitEditing={dismissKeyboard}
-            {...TEXT_INPUT_DONE_PROPS}
-          />
-          <TextInput
-            value={storeName}
-            onChangeText={setStoreName}
-            placeholder="Store name (optional)"
-            placeholderTextColor="#999999"
-            style={styles.groceryFeedbackInput}
-            returnKeyType="done"
-            blurOnSubmit
-            onSubmitEditing={dismissKeyboard}
-            {...TEXT_INPUT_DONE_PROPS}
-          />
-          <Pressable
-            onPress={() => {
-              if (!feedbackRating) return;
-              onEstimateFeedback({
-                rating: feedbackRating,
-                actualTotal,
-                storeName
-              }, plan);
-              setFeedbackSubmitted(true);
-            }}
-            disabled={!feedbackRating}
-            style={[
-              styles.groceryFeedbackSubmit,
-              !feedbackRating && styles.continueDisabled
-            ]}
-          >
-            <Text style={styles.groceryFeedbackSubmitText}>
-              {feedbackSubmitted ? 'Feedback saved' : 'Submit price feedback'}
-            </Text>
+          <Text style={styles.accountGateEyebrow}>{content.eyebrow}</Text>
+          <Text style={styles.accountGateTitle}>{content.title}</Text>
+          <Text style={styles.accountGateBody}>{content.body}</Text>
+          <Pressable onPress={onCreateAccount} style={styles.accountGatePrimary}>
+            <Text style={styles.accountGatePrimaryText}>Create free account</Text>
+          </Pressable>
+          <Pressable onPress={onDismiss} style={styles.accountGateSecondary}>
+            <Text style={styles.accountGateSecondaryText}>Keep browsing as guest</Text>
           </Pressable>
         </View>
-      ) : null}
+      </View>
+    </Modal>
+  );
+}
+
+function PriceFeedbackPrompt({ visible, step, plan, onAnswer, onSubmitFeedback, onBackToQuestion }) {
+  const groceryEstimate = plan?.groceryEstimate;
+  const currencySymbol = getCurrencySymbolFromEstimateOrLocation(groceryEstimate, plan?.preferences?.location);
+
+  if (!plan || !groceryEstimate) return null;
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => onAnswer?.('not_yet')}
+    >
+      <View style={styles.priceFeedbackOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.priceFeedbackKeyboardWrap}
+        >
+          <View style={styles.priceFeedbackCard}>
+            {step === 'form' ? (
+              <>
+                <View style={styles.priceFeedbackHeaderRow}>
+                  <View>
+                    <Text style={styles.priceFeedbackEyebrow}>Grocery feedback</Text>
+                    <Text style={styles.priceFeedbackTitle}>How close was the estimate?</Text>
+                  </View>
+                  <Pressable onPress={onBackToQuestion} style={styles.priceFeedbackBackButton}>
+                    <Text style={styles.priceFeedbackBackText}>Back</Text>
+                  </Pressable>
+                </View>
+                <Text style={styles.priceFeedbackEstimate}>
+                  Estimated {formatCurrencyAmount(groceryEstimate.estimatedTotal, currencySymbol)} for {plan.summary?.totalMeals || 0} meals.
+                </Text>
+                <GroceryFeedbackForm
+                  plan={plan}
+                  onEstimateFeedback={onSubmitFeedback}
+                  submitLabel="Save feedback"
+                  submittedLabel="Saved"
+                  compact
+                />
+              </>
+            ) : (
+              <>
+                <Text style={styles.priceFeedbackEyebrow}>Quick check</Text>
+                <Text style={styles.priceFeedbackTitle}>Did you shop this plan?</Text>
+                <Text style={styles.priceFeedbackBody}>
+                  Your estimate was {formatCurrencyAmount(groceryEstimate.estimatedTotal, currencySymbol)}. If you checked out, your receipt helps improve future prices.
+                </Text>
+                <View style={styles.priceFeedbackActions}>
+                  <Pressable onPress={() => onAnswer?.('yes')} style={styles.priceFeedbackPrimary}>
+                    <Text style={styles.priceFeedbackPrimaryText}>Yes</Text>
+                  </Pressable>
+                  <Pressable onPress={() => onAnswer?.('no')} style={styles.priceFeedbackSecondary}>
+                    <Text style={styles.priceFeedbackSecondaryText}>No</Text>
+                  </Pressable>
+                  <Pressable onPress={() => onAnswer?.('not_yet')} style={styles.priceFeedbackSecondary}>
+                    <Text style={styles.priceFeedbackSecondaryText}>I haven't shopped yet</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </View>
+    </Modal>
+  );
+}
+
+function GroceryFeedbackForm({
+  plan,
+  onEstimateFeedback,
+  submitLabel = 'Submit price feedback',
+  submittedLabel = 'Feedback saved',
+  compact = false
+}) {
+  const groceryEstimate = plan?.groceryEstimate;
+  const currencySymbol = getCurrencySymbolFromEstimateOrLocation(groceryEstimate, plan?.preferences?.location);
+  const [feedbackRating, setFeedbackRating] = useState('');
+  const [actualTotal, setActualTotal] = useState('');
+  const [storeName, setStoreName] = useState(plan?.preferences?.storeName || '');
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [feedbackError, setFeedbackError] = useState('');
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+
+  if (!groceryEstimate) return null;
+
+  return (
+    <View style={[styles.groceryFeedback, compact && styles.groceryFeedbackCompact]}>
+      <Text style={styles.groceryFeedbackTitle}>Was this estimate close?</Text>
+      <Text style={styles.groceryFeedbackHint}>
+        This helps CutPlate learn how grocery costs differ by market and store.
+      </Text>
+      <View style={styles.groceryFeedbackChoices}>
+        {[
+          { value: 'too_low', label: 'Too low' },
+          { value: 'close', label: 'Close' },
+          { value: 'too_high', label: 'Too high' }
+        ].map((option) => (
+          <Pressable
+            key={option.value}
+            onPress={() => {
+              setFeedbackRating(option.value);
+              setFeedbackSubmitted(false);
+              setFeedbackError('');
+            }}
+            style={[
+              styles.groceryFeedbackChoice,
+              feedbackRating === option.value && styles.groceryFeedbackChoiceSelected
+            ]}
+          >
+            <Text
+              style={[
+                styles.groceryFeedbackChoiceText,
+                feedbackRating === option.value && styles.groceryFeedbackChoiceTextSelected
+              ]}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <TextInput
+        value={actualTotal}
+        onChangeText={(value) => {
+          setActualTotal(value);
+          setFeedbackSubmitted(false);
+          setFeedbackError('');
+        }}
+        placeholder={`Actual checkout total (optional, ${currencySymbol})`}
+        placeholderTextColor="#999999"
+        keyboardType="decimal-pad"
+        style={styles.groceryFeedbackInput}
+        returnKeyType="done"
+        blurOnSubmit
+        onSubmitEditing={dismissKeyboard}
+        {...TEXT_INPUT_DONE_PROPS}
+      />
+      <TextInput
+        value={storeName}
+        onChangeText={(value) => {
+          setStoreName(value);
+          setFeedbackSubmitted(false);
+          setFeedbackError('');
+        }}
+        placeholder="Store name (optional)"
+        placeholderTextColor="#999999"
+        style={styles.groceryFeedbackInput}
+        returnKeyType="done"
+        blurOnSubmit
+        onSubmitEditing={dismissKeyboard}
+        {...TEXT_INPUT_DONE_PROPS}
+      />
+      {feedbackError ? <Text style={styles.errorText}>{feedbackError}</Text> : null}
+      <Pressable
+        onPress={async () => {
+          if (!feedbackRating || isSubmittingFeedback) return;
+          setFeedbackError('');
+          setIsSubmittingFeedback(true);
+          const didSave = await onEstimateFeedback?.({
+            rating: feedbackRating,
+            actualTotal,
+            storeName
+          }, plan);
+          setIsSubmittingFeedback(false);
+          if (didSave === false) {
+            setFeedbackError('Could not save feedback. Check the connection and try again.');
+            return;
+          }
+          setFeedbackSubmitted(true);
+        }}
+        disabled={!feedbackRating || isSubmittingFeedback}
+        style={[
+          styles.groceryFeedbackSubmit,
+          (!feedbackRating || isSubmittingFeedback) && styles.continueDisabled
+        ]}
+      >
+        {isSubmittingFeedback ? <ActivityIndicator color={COLORS.white} /> : null}
+        <Text style={styles.groceryFeedbackSubmitText}>
+          {isSubmittingFeedback ? 'Saving' : feedbackSubmitted ? submittedLabel : submitLabel}
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -4606,7 +5945,8 @@ function SaveRecipeButton({ recipe, onSaveRecipe }) {
   useEffect(() => () => clearTimeout(timeoutRef.current), []);
 
   const handleSave = async () => {
-    await onSaveRecipe?.(recipe);
+    const didSave = await onSaveRecipe?.(recipe);
+    if (didSave === false) return;
     setSaved(true);
     scale.setValue(0.96);
     Animated.sequence([
@@ -4894,6 +6234,17 @@ const styles = StyleSheet.create({
     gap: 14,
     padding: 18
   },
+  homeActionRepeat: {
+    minHeight: 118,
+    borderRadius: 20,
+    backgroundColor: '#fff2f4',
+    borderWidth: 2,
+    borderColor: '#ffd5dc',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 18
+  },
   homeActionIcon: {
     width: 52,
     height: 52,
@@ -4947,17 +6298,15 @@ const styles = StyleSheet.create({
   },
   profileSubmitButton: {
     minHeight: 54,
-    borderRadius: 18,
-    borderWidth: 2,
-    borderColor: '#ffd5dc',
-    backgroundColor: COLORS.white,
+    borderRadius: 8,
+    backgroundColor: COLORS.green,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 10
   },
   profileSubmitButtonText: {
-    color: COLORS.cardinal,
+    color: COLORS.white,
     fontSize: 17,
     fontWeight: '900'
   },
@@ -5062,6 +6411,131 @@ const styles = StyleSheet.create({
   homeClearCalendarText: {
     color: COLORS.cardinal,
     fontSize: 14,
+    fontWeight: '900'
+  },
+  recipeHistorySection: {
+    backgroundColor: COLORS.pale2,
+    borderRadius: 20,
+    padding: 16,
+    gap: 12,
+    marginTop: 16
+  },
+  recipeHistoryHeader: {
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  recipeHistoryTitleRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  recipeHistoryTotal: {
+    minWidth: 30,
+    color: COLORS.cardinal,
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'right'
+  },
+  recipeHistoryTabs: {
+    minHeight: 42,
+    flexDirection: 'row',
+    gap: 6
+  },
+  recipeHistoryTab: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 42,
+    borderRadius: 12,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4
+  },
+  recipeHistoryTabSelected: {
+    backgroundColor: COLORS.cardinal,
+    borderColor: COLORS.cardinal
+  },
+  recipeHistoryTabText: {
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'center'
+  },
+  recipeHistoryTabTextSelected: {
+    color: COLORS.white
+  },
+  recipeHistoryList: {
+    gap: 9
+  },
+  recipeHistoryItem: {
+    minHeight: 88,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: '#e8e8e4',
+    padding: 12,
+    gap: 9
+  },
+  recipeHistoryItemTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8
+  },
+  recipeHistoryItemText: {
+    flex: 1,
+    minWidth: 0
+  },
+  recipeHistoryName: {
+    color: COLORS.ink,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '900'
+  },
+  recipeHistoryMeta: {
+    color: COLORS.muted,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+    marginTop: 2
+  },
+  recipeHistoryWhen: {
+    color: COLORS.muted,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '800'
+  },
+  recipeHistoryBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6
+  },
+  recipeHistoryBadge: {
+    minHeight: 27,
+    borderRadius: 14,
+    backgroundColor: '#fff8df',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5
+  },
+  recipeHistoryBadgeLiked: {
+    backgroundColor: '#fff2f4'
+  },
+  recipeHistoryBadgePlanned: {
+    backgroundColor: '#eaf8e4'
+  },
+  recipeHistoryBadgeText: {
+    color: COLORS.ink,
+    fontSize: 11,
+    lineHeight: 15,
     fontWeight: '900'
   },
   savedRecipeShelf: {
@@ -5277,6 +6751,154 @@ const styles = StyleSheet.create({
   pantryPhotoText: {
     flex: 1,
     gap: 4
+  },
+  pantryReviewSection: {
+    backgroundColor: COLORS.pale2,
+    borderRadius: 20,
+    padding: 16,
+    gap: 14,
+    marginBottom: 14
+  },
+  pantryReviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  pantryReviewHeading: {
+    flex: 1,
+    gap: 2
+  },
+  pantryReviewCount: {
+    minWidth: 56,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#eaf8e4',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 10
+  },
+  pantryReviewCountText: {
+    color: COLORS.greenDark,
+    fontSize: 15,
+    fontWeight: '900'
+  },
+  pantryReviewList: {
+    gap: 8
+  },
+  pantryReviewItem: {
+    minHeight: 66,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: '#e8e8e4',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingLeft: 11,
+    paddingRight: 8,
+    paddingVertical: 9
+  },
+  pantryReviewCheck: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.green,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  pantryReviewItemText: {
+    flex: 1,
+    minWidth: 0
+  },
+  pantryReviewItemName: {
+    color: COLORS.ink,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '900'
+  },
+  pantryReviewItemMeta: {
+    color: COLORS.muted,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+    marginTop: 1
+  },
+  pantryReviewRemove: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#fff2f4',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  pantryReviewEmpty: {
+    color: COLORS.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '700',
+    paddingVertical: 8
+  },
+  pantryAddRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 8
+  },
+  pantryAddInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 52,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    color: COLORS.ink,
+    fontSize: 16,
+    fontWeight: '700',
+    paddingHorizontal: 13
+  },
+  pantryAddButton: {
+    width: 92,
+    minHeight: 52,
+    borderRadius: 14,
+    backgroundColor: COLORS.cardinal,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6
+  },
+  pantryAddButtonText: {
+    color: COLORS.white,
+    fontSize: 15,
+    fontWeight: '900'
+  },
+  pantryLearningNote: {
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: '#fff8df',
+    borderWidth: 1,
+    borderColor: '#f1df9b',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    marginBottom: 18
+  },
+  pantryLearningNoteText: {
+    flex: 1,
+    color: '#684711',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800'
+  },
+  pantryMealTypeTitle: {
+    color: COLORS.ink,
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: '900'
   },
   detectedIngredientPanel: {
     backgroundColor: COLORS.pale2,
@@ -5983,6 +7605,20 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginTop: 3
   },
+  preferenceReasonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 4,
+    marginBottom: 4
+  },
+  preferenceReasonText: {
+    flex: 1,
+    color: COLORS.cardinal,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '900'
+  },
   menuMealDesc: {
     color: COLORS.muted,
     fontSize: 15,
@@ -6449,6 +8085,10 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     gap: 10
   },
+  groceryFeedbackCompact: {
+    borderTopWidth: 0,
+    paddingTop: 0
+  },
   groceryFeedbackTitle: {
     color: COLORS.ink,
     fontSize: 17,
@@ -6500,12 +8140,186 @@ const styles = StyleSheet.create({
     minHeight: 46,
     borderRadius: 12,
     backgroundColor: COLORS.cardinal,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    gap: 8
   },
   groceryFeedbackSubmitText: {
     color: COLORS.white,
     fontSize: 14,
+    fontWeight: '900'
+  },
+  accountGateOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(6, 6, 6, 0.44)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 28
+  },
+  accountGateCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 8,
+    backgroundColor: COLORS.white,
+    padding: 20,
+    gap: 12,
+    shadowColor: COLORS.ink,
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.22,
+    shadowRadius: 28,
+    elevation: 12
+  },
+  accountGateIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 8,
+    backgroundColor: '#fff0f2',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  accountGateEyebrow: {
+    color: COLORS.cardinal,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase'
+  },
+  accountGateTitle: {
+    color: COLORS.ink,
+    fontSize: 25,
+    lineHeight: 31,
+    fontWeight: '900'
+  },
+  accountGateBody: {
+    color: COLORS.muted,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '700'
+  },
+  accountGatePrimary: {
+    minHeight: 50,
+    borderRadius: 8,
+    backgroundColor: COLORS.green,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4
+  },
+  accountGatePrimaryText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '900'
+  },
+  accountGateSecondary: {
+    minHeight: 46,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  accountGateSecondaryText: {
+    color: COLORS.muted,
+    fontSize: 14,
+    fontWeight: '800'
+  },
+  priceFeedbackOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(6, 6, 6, 0.44)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 28
+  },
+  priceFeedbackKeyboardWrap: {
+    width: '100%',
+    maxWidth: 440
+  },
+  priceFeedbackCard: {
+    width: '100%',
+    maxHeight: '92%',
+    borderRadius: 22,
+    backgroundColor: COLORS.white,
+    padding: 18,
+    gap: 14,
+    shadowColor: COLORS.ink,
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.22,
+    shadowRadius: 28,
+    elevation: 12
+  },
+  priceFeedbackHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12
+  },
+  priceFeedbackEyebrow: {
+    color: COLORS.cardinal,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase'
+  },
+  priceFeedbackTitle: {
+    color: COLORS.ink,
+    fontSize: 25,
+    lineHeight: 31,
+    fontWeight: '900',
+    marginTop: 4
+  },
+  priceFeedbackBody: {
+    color: COLORS.muted,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '700'
+  },
+  priceFeedbackEstimate: {
+    color: COLORS.greenDark,
+    backgroundColor: '#eff9eb',
+    borderRadius: 14,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '900'
+  },
+  priceFeedbackActions: {
+    gap: 9
+  },
+  priceFeedbackPrimary: {
+    minHeight: 50,
+    borderRadius: 15,
+    backgroundColor: COLORS.green,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  priceFeedbackPrimaryText: {
+    color: COLORS.white,
+    fontSize: 17,
+    fontWeight: '900'
+  },
+  priceFeedbackSecondary: {
+    minHeight: 48,
+    borderRadius: 15,
+    backgroundColor: COLORS.pale,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14
+  },
+  priceFeedbackSecondaryText: {
+    color: COLORS.ink,
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'center'
+  },
+  priceFeedbackBackButton: {
+    minHeight: 36,
+    borderRadius: 13,
+    backgroundColor: COLORS.pale,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12
+  },
+  priceFeedbackBackText: {
+    color: COLORS.cardinal,
+    fontSize: 13,
     fontWeight: '900'
   },
   safetyText: {

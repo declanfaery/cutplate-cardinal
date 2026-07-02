@@ -35,6 +35,10 @@ exposing user emails or raw event data.
 - `learningSignals.topMarkets`: coarse markets such as `us-nyc`, `canada`, and `uk`.
 - `groceryPriceIntelligence.averageAbsoluteErrorPct`: average difference between
   the estimated grocery total and optional user-reported checkout totals.
+- `groceryPriceIntelligence.uniqueCheckoutObservations`: deduplicated numeric
+  checkout observations stored in `public.grocery_price_observations`.
+- `groceryPriceIntelligence.contributors`: distinct users or installations that
+  supplied those checkout observations.
 - `groceryPriceIntelligence.closeRatePct`: share of estimate feedback marked "Close."
 - `recipeCache.cacheHitRatePct`: share of generation sessions served from cached recipes.
 - `ai.inputTokens`, `ai.outputTokens`, and `ai.averageLatencyMs`: model usage and speed.
@@ -101,23 +105,37 @@ all-time value, request a sufficiently large window such as `days=3650`.
 ## Notes
 
 - Events with platform `manual` or `test` are excluded from reports.
-- Anonymous installation ID is the primary user key because it remains stable
-  before and after optional profile creation.
-- Exact ZIP/postal codes and pantry-photo contents are not stored in analytics.
-  Market reporting uses broad regions only.
+- Anonymous installation ID supports aggregate product reporting. Recipe
+  preference profiles are built only from events linked to an account ID or
+  email.
+- Exact ZIP/postal codes and pantry photos are not stored in analytics. For
+  signed-in accounts, normalized ingredient labels added, kept, or removed
+  during pantry review are stored so later scans can use that feedback. Market
+  reporting uses broad regions only.
 - Store names and checkout totals are only submitted through the optional
   "How close was this estimate?" grocery-list feedback form.
+- Numeric checkout feedback is upserted by a stable feedback ID, so correcting
+  or resubmitting the same plan does not count as another price-learning sample.
+- Store and market adjustments require at least three unique observations from
+  at least two contributors and are blended toward the base estimate while data
+  remains sparse.
 - Grocery-price intelligence now measures estimates, budget fit, broad markets,
   and optional actual checkout totals. Retailer-specific live pricing still
   requires retailer feeds, affiliate catalogs, or receipt integrations.
+
+## Grocery Price Storage
+
+Run `server/migrations/20260629_grocery_price_observations.sql` against Supabase
+before deploying the corresponding API build. The migration is additive and
+also backfills distinct historical numeric feedback from `analytics_events`.
 
 ## Defensibility Event Map
 
 | Data loop | Events | What it can improve |
 | --- | --- | --- |
-| Pantry-image recognition | `pantry_photo_scanned`, `pantry_scan_confirmed` | Detection accuracy, missed ingredients, confidence calibration |
+| Pantry-image recognition | `pantry_photo_scanned`, `pantry_scan_confirmed` | Account-scoped hints for repeatedly missed or rejected ingredient labels, detection accuracy, and confidence calibration |
 | Budget-aware optimization | `menu_pricing_updated`, `menu_selected`, `recipe_selection_blocked` | Affordable option mix, marginal cost, budget utilization |
-| Preference learning | `recipe_selection_changed`, `recipe_saved`, `recipe_repeated`, `recipe_unsaved` | Ranking, repeats, proteins and recipe styles people keep or reject |
+| Preference learning | `recipe_selection_changed`, `recipe_saved`, `recipe_repeated`, `recipe_unsaved`, `recipe_swapped`, `recipe_added_to_calendar`, `menu_selected` | Account-scoped ranking, similar new recipes, novelty, proteins, ingredients, and recipe styles people keep or reject |
 | Grocery-price intelligence | `grocery_list_viewed`, `grocery_estimate_feedback` | Regional multipliers and estimate error |
 | Funnel and retention | `session_started`, `session_ended`, `screen_viewed`, `app_opened` | Drop-off, session quality, D7 retention |
 | Cost efficiency | `ai_request_completed`, `ai_request_failed`, generation cache fields | AI cost, latency, reliability, cache reuse |

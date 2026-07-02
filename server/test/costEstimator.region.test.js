@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { attachGroceryEstimate } from '../src/costEstimator.js';
+import { recordGroceryPriceFeedback, resetPriceLearningForTests } from '../src/priceLearning.js';
 
 function samplePlan(location) {
   return {
@@ -111,4 +112,39 @@ test('implausible non-batch chicken weights are capped before regional pricing',
   assert.equal(chicken.purchaseQuantity, 1);
   assert.match(chicken.quantityLabel, /need ~1\.3 lb/);
   assert.ok(chicken.estimatedCost < 15, `expected sane UK chicken estimate, got ${chicken.estimatedCost}`);
+});
+
+test('grocery estimates apply learned market pricing from checkout feedback', async () => {
+  resetPriceLearningForTests();
+  const basePlan = attachGroceryEstimate(samplePlan('Toronto Canada'));
+  const estimatedTotal = basePlan.groceryEstimate.estimatedTotal;
+
+  for (const [index, userId] of ['shopper-1', 'shopper-2', 'shopper-1'].entries()) {
+    await recordGroceryPriceFeedback({
+      feedbackId: `feedback-${index + 1}`,
+      userId,
+      estimatedTotal,
+      actualTotal: estimatedTotal * 1.5,
+      coarseMarket: 'canada',
+      currency: 'CAD',
+      storeName: 'Price Chopper'
+    }, { persist: false });
+  }
+
+  const learnedPlan = attachGroceryEstimate(samplePlan('Toronto Canada'));
+
+  assert.ok(
+    learnedPlan.groceryEstimate.estimatedTotal > estimatedTotal,
+    `expected learned estimate above ${estimatedTotal}, got ${learnedPlan.groceryEstimate.estimatedTotal}`
+  );
+  assert.ok(
+    learnedPlan.groceryEstimate.estimatedTotal < estimatedTotal * 1.5,
+    'learned estimate should be smoothed instead of matching one receipt exactly'
+  );
+  assert.equal(learnedPlan.groceryEstimate.priceLearning.source, 'market');
+  assert.equal(learnedPlan.groceryEstimate.priceLearning.samples, 3);
+  assert.equal(learnedPlan.groceryEstimate.priceLearning.distinctIdentities, 2);
+  assert.match(learnedPlan.groceryEstimate.note, /Adjusted with 3 market feedback samples/);
+
+  resetPriceLearningForTests();
 });

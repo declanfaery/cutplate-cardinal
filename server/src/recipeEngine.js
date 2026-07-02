@@ -261,6 +261,7 @@ export function normalizePreferences(input = {}) {
     servingsPerMeal: Number.isFinite(servingsPerMeal) && servingsPerMeal > 0 ? Math.round(servingsPerMeal) : 2,
     allergies,
     location: cleanText(input.location, ''),
+    storeName: cleanText(input.storeName || input.groceryStore || input.store, ''),
     groceryBudget: Number.isFinite(groceryBudget) && groceryBudget > 0 ? Math.round(groceryBudget) : null,
     calorieTarget: Number.isFinite(calorieTarget) && calorieTarget >= 100 ? Math.round(calorieTarget) : null,
     calorieTargetBasis: 'per_meal_per_serving',

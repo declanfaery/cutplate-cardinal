@@ -217,6 +217,7 @@ export async function analyzePantryImage(input = {}) {
 
   const imageBase64 = String(input.imageBase64 || '').trim();
   const mimeType = normalizeImageMimeType(input.mimeType);
+  const pantryLearningGuidance = String(input.pantryLearningGuidance || '').trim().slice(0, 1800);
 
   if (!imageBase64) {
     const error = new Error('Add a pantry photo first.');
@@ -233,8 +234,10 @@ export async function analyzePantryImage(input = {}) {
         content: [
           {
             type: 'input_text',
-            text:
-              'You identify visible pantry, fridge, freezer, and countertop food items from a user photo for a meal-planning app. Return only items that are reasonably visible or strongly implied by readable packaging. Do not invent hidden ingredients. Keep names grocery-friendly, concise, and singular where possible. The proteins array is only for true primary proteins such as chicken, turkey, beef, pork, sausage, fish, seafood, eggs, tofu, tempeh, beans, lentils, Greek yogurt, or cottage cheese. Never classify protein pasta, boxed macaroni, cheese sauce, snack foods, or tomato sauce as proteins.'
+            text: [
+              'You identify visible pantry, fridge, freezer, and countertop food items from a user photo for a meal-planning app. Return only items that are reasonably visible or strongly implied by readable packaging. Do not invent hidden ingredients. Keep names grocery-friendly, concise, and singular where possible. The proteins array is only for true primary proteins such as chicken, turkey, beef, pork, sausage, fish, seafood, eggs, tofu, tempeh, beans, lentils, Greek yogurt, or cottage cheese. Never classify protein pasta, boxed macaroni, cheese sauce, snack foods, or tomato sauce as proteins.',
+              pantryLearningGuidance
+            ].filter(Boolean).join(' ')
           }
         ]
       },
