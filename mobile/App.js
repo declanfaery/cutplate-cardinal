@@ -21,6 +21,7 @@ import {
   View
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Notifications from 'expo-notifications';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Svg, { Circle, Path } from 'react-native-svg';
 import {
@@ -42,6 +43,17 @@ import {
   Trash2,
   UserPlus
 } from 'lucide-react-native';
+
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false
+    })
+  });
+}
 
 const API_URL =
   process.env.EXPO_PUBLIC_API_URL ||
@@ -141,6 +153,7 @@ const USER_STORAGE_KEY = 'cutplate:user:v1';
 const ONBOARDING_COMPLETE_STORAGE_KEY = 'cutplate:onboarding-complete:v1';
 const CALENDAR_STORAGE_KEY = 'cutplate:calendar:v1';
 const SHOPPING_LIST_STORAGE_KEY = 'cutplate:shopping-list:v1';
+const SHOPPING_LIST_NOTIFICATION_STORAGE_KEY = 'cutplate:shopping-list-notification:v1';
 const PRICE_FEEDBACK_PROMPT_STORAGE_KEY = 'cutplate:price-feedback-prompt:v1';
 const SAVED_RECIPES_STORAGE_KEY = 'cutplate:saved-recipes:v1';
 const RECIPE_HISTORY_STORAGE_KEY = 'cutplate:recipe-history:v1';
@@ -149,6 +162,9 @@ const ANALYTICS_ID_STORAGE_KEY = 'cutplate:analytics-id:v1';
 const KEYBOARD_ACCESSORY_ID = 'cutplate-keyboard-done';
 const KEYBOARD_DISMISS_MODE = Platform.OS === 'ios' ? 'interactive' : 'on-drag';
 const TEXT_INPUT_DONE_PROPS = Platform.OS === 'ios' ? { inputAccessoryViewID: KEYBOARD_ACCESSORY_ID } : {};
+const SHOPPING_LIST_NOTIFICATION_ID = 'cutplate-shopping-list-ready';
+const SHOPPING_LIST_NOTIFICATION_CHANNEL_ID = 'shopping-list';
+const SHOPPING_LIST_NOTIFICATION_DELAY_SECONDS = 60;
 const ONBOARDING_SLIDES = [
   {
     title: 'Meal plans built around you.',
@@ -325,11 +341,13 @@ export default function App() {
         await AsyncStorage.multiRemove([
           CALENDAR_STORAGE_KEY,
           SHOPPING_LIST_STORAGE_KEY,
+          SHOPPING_LIST_NOTIFICATION_STORAGE_KEY,
           PRICE_FEEDBACK_PROMPT_STORAGE_KEY,
           SAVED_RECIPES_STORAGE_KEY,
           RECIPE_HISTORY_STORAGE_KEY,
           PREFERRED_STORE_STORAGE_KEY
         ]);
+        await cancelShoppingListNotification();
       } else if (!storedHistory.length && initialHistory.length) {
         await saveStoredJson(RECIPE_HISTORY_STORAGE_KEY, initialHistory);
       }
@@ -471,6 +489,29 @@ export default function App() {
       planId: planKey
     });
   }, [hasBooted, plan, planStage, viewer?.id]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+
+    const handleNotificationResponse = (response) => {
+      const data = response?.notification?.request?.content?.data || {};
+      if (data.screen !== 'shopping-list') return;
+
+      setError('');
+      setAppMode('shopping');
+      void trackEvent('shopping_list_notification_opened', {
+        planId: data.planId || null,
+        hasList: hasShoppingPlan(latestShoppingPlan)
+      });
+      Notifications.clearLastNotificationResponse?.();
+    };
+
+    const subscription = Notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
+    const lastResponse = Notifications.getLastNotificationResponse?.();
+    if (lastResponse) handleNotificationResponse(lastResponse);
+
+    return () => subscription.remove();
+  }, [analyticsId, latestShoppingPlan?.id, viewer?.email, viewer?.id]);
 
   const startGuidedPlan = () => {
     void trackEvent('meal_plan_started', {
@@ -775,6 +816,7 @@ export default function App() {
       saveStoredJson(PRICE_FEEDBACK_PROMPT_STORAGE_KEY, shoppingPlan),
       rememberRecipes(meals.map((meal) => meal.recipe || meal), 'planned')
     ]);
+    const notificationResult = await scheduleShoppingListNotification(shoppingPlan);
     setPlan(null);
     setSelectedMenuPlan(null);
     setSelectedMealIds([]);
@@ -797,6 +839,12 @@ export default function App() {
       repeatRecipeRatePct: meals.length
         ? Number(((repeatedMeals.length / meals.length) * 100).toFixed(1))
         : 0
+    });
+    void trackEvent('shopping_list_notification_result', {
+      status: notificationResult.status,
+      reason: notificationResult.reason || null,
+      identifier: notificationResult.identifier || null,
+      firesAfterSeconds: notificationResult.firesAfterSeconds || null
     });
     for (const meal of uniqueRecipesByName(meals)) {
       void trackEvent('recipe_added_to_calendar', {
@@ -983,7 +1031,15 @@ export default function App() {
     setPriceFeedbackPromptVisible(false);
     setPriceFeedbackPromptStep('ask');
     setActiveCalendarMeal(null);
-    await AsyncStorage.multiRemove([CALENDAR_STORAGE_KEY, SHOPPING_LIST_STORAGE_KEY, PRICE_FEEDBACK_PROMPT_STORAGE_KEY]);
+    await Promise.all([
+      AsyncStorage.multiRemove([
+        CALENDAR_STORAGE_KEY,
+        SHOPPING_LIST_STORAGE_KEY,
+        SHOPPING_LIST_NOTIFICATION_STORAGE_KEY,
+        PRICE_FEEDBACK_PROMPT_STORAGE_KEY
+      ]),
+      cancelShoppingListNotification()
+    ]);
     void trackEvent('calendar_cleared', { clearedMealCount });
   };
 
@@ -1280,15 +1336,19 @@ export default function App() {
       // Local deletion still lets the user remove app data from this device.
     }
 
-    await AsyncStorage.multiRemove([
-      USER_STORAGE_KEY,
-      ONBOARDING_COMPLETE_STORAGE_KEY,
-      CALENDAR_STORAGE_KEY,
-      SHOPPING_LIST_STORAGE_KEY,
-      PRICE_FEEDBACK_PROMPT_STORAGE_KEY,
-      SAVED_RECIPES_STORAGE_KEY,
-      RECIPE_HISTORY_STORAGE_KEY,
-      PREFERRED_STORE_STORAGE_KEY
+    await Promise.all([
+      AsyncStorage.multiRemove([
+        USER_STORAGE_KEY,
+        ONBOARDING_COMPLETE_STORAGE_KEY,
+        CALENDAR_STORAGE_KEY,
+        SHOPPING_LIST_STORAGE_KEY,
+        SHOPPING_LIST_NOTIFICATION_STORAGE_KEY,
+        PRICE_FEEDBACK_PROMPT_STORAGE_KEY,
+        SAVED_RECIPES_STORAGE_KEY,
+        RECIPE_HISTORY_STORAGE_KEY,
+        PREFERRED_STORE_STORAGE_KEY
+      ]),
+      cancelShoppingListNotification()
     ]);
     setViewer(null);
     setHasCompletedOnboarding(false);
@@ -2442,6 +2502,145 @@ async function saveStoredJson(key, value) {
   } catch {
     // Local persistence should never block the meal plan flow.
   }
+}
+
+function isNotificationPermissionGranted(settings = {}) {
+  return Boolean(
+    settings.granted
+    || settings.ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED
+    || settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+  );
+}
+
+async function ensureShoppingNotificationChannel() {
+  if (Platform.OS !== 'android') return;
+
+  await Notifications.setNotificationChannelAsync(SHOPPING_LIST_NOTIFICATION_CHANNEL_ID, {
+    name: 'Shopping list reminders',
+    importance: Notifications.AndroidImportance.HIGH,
+    description: 'Reminders to review saved recipe shopping lists.',
+    lightColor: COLORS.cardinal,
+    vibrationPattern: [0, 250, 250, 250],
+    enableVibrate: true,
+    showBadge: false
+  });
+}
+
+async function scheduleShoppingListNotification(plan) {
+  if (Platform.OS === 'web') {
+    return { status: 'skipped', reason: 'web' };
+  }
+
+  if (!hasShoppingPlan(plan)) {
+    return { status: 'skipped', reason: 'no-shopping-list' };
+  }
+
+  try {
+    await ensureShoppingNotificationChannel();
+
+    let permissions = await Notifications.getPermissionsAsync();
+    if (!isNotificationPermissionGranted(permissions)) {
+      permissions = await Notifications.requestPermissionsAsync({
+        ios: {
+          allowAlert: true,
+          allowBadge: false,
+          allowSound: true
+        }
+      });
+    }
+
+    if (!isNotificationPermissionGranted(permissions)) {
+      await AsyncStorage.removeItem(SHOPPING_LIST_NOTIFICATION_STORAGE_KEY);
+      return { status: 'denied', reason: permissions.status || 'permission-denied' };
+    }
+
+    await Notifications.cancelScheduledNotificationAsync(SHOPPING_LIST_NOTIFICATION_ID).catch(() => {});
+
+    const trigger = {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      seconds: SHOPPING_LIST_NOTIFICATION_DELAY_SECONDS,
+      repeats: false
+    };
+    if (Platform.OS === 'android') {
+      trigger.channelId = SHOPPING_LIST_NOTIFICATION_CHANNEL_ID;
+    }
+
+    const identifier = await Notifications.scheduleNotificationAsync({
+      identifier: SHOPPING_LIST_NOTIFICATION_ID,
+      content: {
+        title: 'Your shopping list is ready',
+        body: formatShoppingListNotificationBody(plan),
+        sound: true,
+        data: {
+          screen: 'shopping-list',
+          type: 'shopping_list_ready',
+          planId: plan?.id || null,
+          savedAt: plan?.savedAt || null
+        }
+      },
+      trigger
+    });
+
+    await saveStoredJson(SHOPPING_LIST_NOTIFICATION_STORAGE_KEY, {
+      identifier,
+      planId: plan?.id || null,
+      scheduledAt: new Date().toISOString(),
+      firesAfterSeconds: SHOPPING_LIST_NOTIFICATION_DELAY_SECONDS
+    });
+
+    return {
+      status: 'scheduled',
+      identifier,
+      firesAfterSeconds: SHOPPING_LIST_NOTIFICATION_DELAY_SECONDS
+    };
+  } catch (error) {
+    await AsyncStorage.removeItem(SHOPPING_LIST_NOTIFICATION_STORAGE_KEY).catch(() => {});
+    return {
+      status: 'error',
+      reason: String(error?.message || error || 'notification-error')
+    };
+  }
+}
+
+async function cancelShoppingListNotification() {
+  if (Platform.OS === 'web') return;
+
+  try {
+    await Notifications.cancelScheduledNotificationAsync(SHOPPING_LIST_NOTIFICATION_ID);
+  } catch {
+    // Notification cleanup should not block account or calendar cleanup.
+  }
+
+  try {
+    await AsyncStorage.removeItem(SHOPPING_LIST_NOTIFICATION_STORAGE_KEY);
+  } catch {
+    // Local cleanup is best effort.
+  }
+}
+
+function formatShoppingListNotificationBody(plan = {}) {
+  const itemCount = getShoppingListItemCount(plan);
+  const itemCopy = itemCount > 0
+    ? `${itemCount} grocery ${itemCount === 1 ? 'item' : 'items'}`
+    : 'Your recipe groceries';
+  const currencySymbol = getCurrencySymbolFromEstimateOrLocation(
+    plan?.groceryEstimate,
+    plan?.preferences?.location
+  );
+  const estimatedTotal = Number(plan?.groceryEstimate?.estimatedTotal);
+  const totalCopy = Number.isFinite(estimatedTotal) && estimatedTotal > 0
+    ? ` Estimated total: ${formatCurrencyAmount(estimatedTotal, currencySymbol)}.`
+    : '';
+
+  return `${itemCopy} saved for your meal plan.${totalCopy} Tap to review before you shop.`;
+}
+
+function getShoppingListItemCount(plan = {}) {
+  const lineItems = plan?.groceryEstimate?.lineItems;
+  if (Array.isArray(lineItems) && lineItems.length > 0) return lineItems.length;
+
+  const shoppingList = plan?.shoppingList;
+  return Array.isArray(shoppingList) ? shoppingList.length : 0;
 }
 
 async function getOrCreateAnalyticsId() {
